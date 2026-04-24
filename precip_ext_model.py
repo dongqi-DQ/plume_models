@@ -17,30 +17,53 @@ import numpy as np
 import warnings
 from scipy.optimize import root_scalar
 import model_constants as const
-import pandas as pd 
+import pandas as pd
 
 
 # %%
-## Given surface temperature and humidity, and, tropospheric relative humidity
-## This simple plume model predicts the vertical profile of the environmental temperature
-## and consequently the buoyancy of undiluted (CAPE) and weakly-diluted (extreme convection) plumes
+####
+# A Python version of the zero buoyancy plume model in Singh and O'Gorman (2013).
+# With modifications following Zhou and Xie (2019).
+# >> Input parameters are:
 
-## For zero-buoyancy plume model: model_type == 'zero-buoyancy'
-#  environmental temperature is assumed to be neutral to that of bulk-entraining plume
+# T_base : Base temperature of plume (K)
+# qt_base: Base specific humidity of plume (kg/kg)
+# p_base : Base pressure of plume (Pa)
+# entrain: entrainment parameter (unitless)
+#          Depends on "ent_type" (see optional arguments below)
+#                 entrainment = entrain/z    [default]
+#                 entrainment = entrain/1000
+# RH     : environmental relative humidity (unitless, between 0 and 1)
 
-## For spectal plume model: model_type == 'spectral'
-#  environmental temperature is predicted from detraiment temperature of a
-#  spectrum of plumes, by dropping the zero-buoayncy and bulk assumption
+# >> Optional arguments are:
 
-### Additional arguments to ZBP model
+# z_base  : Base height of plume (m) [50 m by default]
+# z_top   : height to which pluem is integrated (m) [15000 m by default]
+# gamma   : fraction of water that precipitates (0, 1) [1 by default]
+#           0 = no fallout
+#           1 = pseudo-adiabatic (all condensed water falls out immediately)
+# ent_type: type of entrainment profile ['invz']
+#         'invz': entrainment = entrain/z    [default]
+#         'const': entrainment = entrain/1000
+# deltaz  : vertical grid-spacing (m) [50 m by default]
+# T_ice   : Temperature of total freezing condensate freezes 
+#          gradually between 273.15 K and T_ice (K) [233.15 K by default]
 
-# powerk: Power parameter for relationship between entrainment rate and height [1.0]
-
-# ent_fac: Constant for computing parameter u in spectral-plume model [0.18]
-
-# eta: Constant for computing parameter u in spectral-plume model [0.75]
-
-## Based on the Matlab code of Zhou and Xie (2019) https://sites.google.com/view/zhouwy/code-note
+# >> Outputs are:
+# T_rho   : Density temperature (plume and env)   (K)
+# T       : Temperature of plume                  (K)
+# p       : pressure            (plume and env)   (K)
+# qv      : specific humidity of plume            (kg/kg)
+# qsat    : saturation specific humidity of plume (kg/kg)
+# ql      : liquid water mass fraction of plume   (kg/kg)
+# qi      : solid water mass fraction of plume    (kg/kg)
+# z       : height                                (z)
+# h       : plume moist static energy             (J/kg)
+# T_env   : Temperature of environment            (K)
+# q_env   : specific humidity of environment      (kg/kg)
+# h_env   : environment moist static energy       (J/kg)
+# ent     : entrainment rate                      (1/m)
+#####
 
 # %%
 ### function to check arguments are correct
@@ -174,6 +197,8 @@ def calc_saturation(p,T,q_t):
 
     return q,ql,qi
 
+
+# %%
 def calc_MSE(T,qt,p,z,const=const):
     # Function to calculate moist static energy
 
@@ -206,6 +231,8 @@ def calc_Tv(T,RH,p,const=const):
 
     return Tv
 
+
+# %%
 def fallout(gamma,ql,qi,dqls,T):
     # Function to calculate precipitation fallout terms
 
@@ -221,9 +248,70 @@ def fallout(gamma,ql,qi,dqls,T):
 
 
 # %%
-def spectral_plume(model_type="spectral",T_base = 300., qt_base = 0.0155, p_base= 100000., entrain = 0.5, RH = 0.7, 
-                        z_base = 50., z_top = 15000., powerk = 1.0 , deltaz = 50., ent_fac  = 0.18, eta = 0.75, P=3.,
-                        const=const, plotting = True,save_data=True):
+def p_from_z(z0, z_lcl, p0, Tv_mean=298.0,const=const):
+    """Approximate pressure at LCL height from hypsometric relation."""
+    return p0 * np.exp(const.g * (z0-z_lcl) / (const.Rd * Tv_mean))
+
+def q0_for_target_lcl(T0, p0, p_lcl,const=const):
+    """
+    Surface specific humidity required so that the parcel LCL is at p_lcl.
+    """
+    kappa = const.Rd / const.cp
+    T_lcl = T0 * (p_lcl / p0) ** kappa
+    q0 = qq_sat(T_lcl, p_lcl)
+    return q0, T_lcl
+
+def q0_for_target_lcl_height(T0, p0, z0, z_lcl, const=const):
+    """
+    Surface specific humidity required so that the parcel LCL is at z_lcl.
+    """
+    ### Assuming dry adiabat 
+    Tv_mean = T0 - 1/2 * const.g/const.cp*z_lcl
+    
+    p_lcl = p_from_z(z0, z_lcl, p0, Tv_mean, const)
+    q0, T_lcl = q0_for_target_lcl(T0, p0, p_lcl, const)
+    return q0, p_lcl, T_lcl
+
+
+
+# %%
+def calc_RH(T,q,p):
+    es_tmp, _, _ = e_sat(T)
+    e = q*p/(const.eps+(1-const.eps)*q)
+    return e/es_tmp
+
+
+def calc_MSE_lvl(lvl, T,qt,p,z,const=const):
+    # Function to calculate moist static energy
+    T_lvl = np.interp(lvl, p[::-1], T[::-1])
+    qt_lvl = np.interp(lvl, p[::-1], qt[::-1])
+    p_lvl = lvl 
+    z_lvl = np.interp(lvl, p[::-1], z[::-1])
+    # calculate proportions of vapor, liquid and solid
+    qv_lvl,ql_lvl,qi_lvl = calc_saturation(p_lvl,T_lvl,qt_lvl)
+
+
+    # calculate moist static energies of components
+    hd_lvl = const.cp*(T_lvl-const.T0)  + const.g*z_lvl
+    hv_lvl = const.cpv*(T_lvl-const.T0) + const.g*z_lvl + const.Lv0
+    hl_lvl = const.cpl*(T_lvl-const.T0) + const.g*z_lvl
+    hi_lvl= const.cpi*(T_lvl-const.T0) + const.g*z_lvl - (const.Ls0-const.Lv0)
+
+    # Calculate moist static energy per unit mass of moist air
+    h = hd_lvl*(1-qt_lvl) + qv_lvl*hv_lvl + ql_lvl*hl_lvl + qi_lvl*hi_lvl
+
+    return h
+
+
+# %%
+def spectral_plume_lcl(model_type="precip",T_base = 300., qt_base = None, p_base= 100000., entrain = 0.5, RH = 0.5, 
+                        z_base = 50.,z_lcl=1400., z_top = 15000., powerk = 1.0 , deltaz = 50., ent_fac  = 0.18, eta = 0.75, P=3.,
+                        const=const, get_plane=True, plotting = True,save_data=True):
+    if qt_base is None :
+        check_argument(z_lcl     ,'z_lcl'     ,(int,float), z_base, z_top) # m
+        qt_base,_,_ = q0_for_target_lcl_height(T_base,p_base,z_base,z_lcl)
+
+        
     ## check input argument types first
     check_argument(model_type,'model_type',(str),       0 , 0)  # 'zero-buoyancy' or 'spectral'
     check_argument(T_base     ,'T_base'     ,(int,float), 0     ,500   )  # K
@@ -232,6 +320,7 @@ def spectral_plume(model_type="spectral",T_base = 300., qt_base = 0.0155, p_base
     check_argument(entrain   ,'entrain'   ,(int,float), 0     ,np.inf)
     check_argument(RH        ,'RH'        ,(int,float), 0     ,1     )
     check_argument(z_base     ,'z_base'     ,(int,float), 0     ,z_top )  # m
+    
     check_argument(z_top     ,'z_top'     ,(int,float), z_base, np.inf)
     check_argument(powerk    ,'powerk'    ,(int,float), 0     ,4     )
     check_argument(deltaz    ,'deltaz'    ,(int,float), 0     ,200   ) # m 
@@ -242,7 +331,7 @@ def spectral_plume(model_type="spectral",T_base = 300., qt_base = 0.0155, p_base
     z = np.arange(z_base, z_top + deltaz, deltaz)
     if np.abs(z[-1] - z_top) > 0.1:
         z = np.append(z, z_top) # ensure last point is exactly z_top
-    
+
     ## Entrainment profile ####################################################
 
     # set entrainment rate as function of z:
@@ -253,16 +342,20 @@ def spectral_plume(model_type="spectral",T_base = 300., qt_base = 0.0155, p_base
     ent = 0.001*entrain*np.minimum(1.,np.maximum(0.,(z_top-z)/z_top))**powerk
     # set entrainment rate of the weakly-entrained plume
     ent_w = 0.001*entrain*np.ones_like(z)*ent_fac
-    
+    ## entrainment from precipitation
+    ent_p = np.zeros_like(z)
+    ent_p[z>z_lcl] = (1/z_lcl) * np.log(P/const.P0 * 0.15 * (z[z>z_lcl]-z_lcl)/z_lcl + 1)/ ((z[z>z_lcl]-z_lcl)/z_lcl)
+    ent_p[z<=z_lcl] = 0
     ## Initialize arrays to hold plume properties
     p       = np.zeros_like(z)
     logp    = np.zeros_like(z)
 
     qv      = np.zeros_like(z)
     qsat    = np.zeros_like(z)
+
     ql      = np.zeros_like(z)
     qi      = np.zeros_like(z)
-    
+
 
     T       = np.zeros_like(z)
     T_rho   = np.zeros_like(z)
@@ -272,7 +365,8 @@ def spectral_plume(model_type="spectral",T_base = 300., qt_base = 0.0155, p_base
     T_env   = np.zeros_like(z)
     q_env   = np.zeros_like(z)
     h_env   = np.zeros_like(z)
-    
+    qsat_env = np.zeros_like(z)
+
     # undiluted plume (moist adiabat with zero entraiment), according to
     # definition of CAPE (convective available potential energy)
     T_u     = np.zeros_like(z)
@@ -293,26 +387,38 @@ def spectral_plume(model_type="spectral",T_base = 300., qt_base = 0.0155, p_base
     CAPE_w  = 0.
     T_w[0]  = T_base
     qv_w[0] = qt_base
-    
+
+    # extreme 
+    T_ext     = np.zeros_like(z)
+    T_rho_ext = np.zeros_like(z)
+    qv_ext    = np.zeros_like(z)
+    h_ext     = np.zeros_like(z)
+    B_ext     = np.zeros_like(z)
+    CAPE_ext  = 0.
+    T_ext[0]  = T_base
+    qv_ext[0] = qt_base
+
     ## Initial conditions
     p[0] = p_base
     T[0] = T_base
     qv[0] = qt_base
-    
+
     ## Derived properties 
     logp[0] = np.log(p[0])
     h[0] = calc_MSE(T[0],qv[0],p[0],z[0])
     h_u[0]   = h[0]
     h_w[0]   = h[0]
-    
+    h_ext[0]   = h[0]
+
     ## Flag for LCL level
     LCL = 0
-    
+
     ## Integrate model upward
     for i in range(0,len(z)):
         # Calculate undiluted plume density temperature, buoyancy and CAPE
         T_rho[i] = T[i]*(1+qv[i]/const.eps-qv[i])
         T_rho_u[i] = T_u[i]*(1+qv_u[i]/const.eps-qv_u[i])
+        
         B_u[i] = const.g*(T_rho_u[i]-T_rho[i])/T_rho[i]
         CAPE_u = CAPE_u+B_u[i]*deltaz
         
@@ -321,13 +427,19 @@ def spectral_plume(model_type="spectral",T_base = 300., qt_base = 0.0155, p_base
         B_w[i] = const.g*(T_rho_w[i]-T_rho[i])/T_rho[i]
         CAPE_w = CAPE_w+np.maximum(B_w[i],0)*deltaz
         
+        ## For extreme
+        T_rho_ext[i] = T_ext[i]*(1+qv_ext[i]/const.eps-qv_ext[i])
+        B_ext[i] = const.g*(T_rho_ext[i]-T_rho[i])/T_rho[i]
+        CAPE_ext = CAPE_ext+np.maximum(B_ext[i],0)*deltaz
+        
         # Calculate plume saturation specific humidity
         qsat[i] = qq_sat(T[i],p[i])
+        
         # Calculate environment properties
         T_env[i] = root_scalar(lambda x: calc_Tv(x, RH, p[i]) - T_rho[i],
-                               x0=T[i] * (1 + 0.61 * RH * qv[i]),
-                               method="newton"
-                               )["root"]
+                                x0=T[i] * (1 + 0.61 * RH * qv[i]),
+                                method="newton"
+                                )["root"]
         
         # Calculate environment humidity based on assumed relative humidity
         es_tmp, _, _ = e_sat(T_env[i])
@@ -337,13 +449,17 @@ def spectral_plume(model_type="spectral",T_base = 300., qt_base = 0.0155, p_base
         # Calculate environment moist static energy
         h_env[i] = calc_MSE(T_env[i],q_env[i],p[i],z[i])
         
+        # Calculate environment saturation specific humidity
+        qsat_env[i] = qq_sat(T_env[i],p[i])
+        
         if i<len(z)-1:
             # No entrainment if unsaturated
             # Include LCL flag to prevent entrainment turning off above LCL
             if (qv[i]-qsat[i]) < 0 and LCL == 0:
                 ent[i]=0
                 ent_w[i] = 0
-                z_lcl = i
+                ent_p[i] = 0
+                zi_lcl = i
             else:
                 LCL = 1
         
@@ -357,16 +473,32 @@ def spectral_plume(model_type="spectral",T_base = 300., qt_base = 0.0155, p_base
                             dent = (ent[i]-ent[i-1])/ent[i]
                         else:
                             dent = 0.
-                        h[i+1] = h[i] - ent[i]*( h[i] - h_env[i] ) *( z[i+1]-z[i] ) - (h[0] - h[i])*dent/(1+eta*ent[i]*(z[i]-z[z_lcl]))
+                        h[i+1] = h[i] - ent[i]*( h[i] - h_env[i] ) *( z[i+1]-z[i] ) - (h[0] - h[i])*dent/(1+eta*ent[i]*(z[i]-z[zi_lcl]))
                     else:
                         h[i+1] = h[i]
 
                 elif model_type=='zero-buoyancy':
                     h[i+1] = h[i] - ent[i]*( h[i] - h_env[i] )*( z[i+1]-z[i] )
+                    
+                elif model_type=='precip':
+                    # h[i+1] = h[i] - ent_p[i]*( h[i] - h_env[i] )*( z[i+1]-z[i] )
+                    if ent_p[i]!=0.:
+                        if z[i]<z_top:
+                            dent = (ent_p[i]-ent_p[i-1])/ent_p[i]
+                        else:
+                            dent = 0.
+                        h[i+1] = h[i] - ent_p[i]*( h[i] - h_env[i] ) *( z[i+1]-z[i] ) - (h[0] - h[i])*dent/(1+eta*ent_p[i]*(z[i]-z_lcl))
+                        ## about extreme?
+                        ent_ext = ent_p[zi_lcl+1]*0.1
+                        h_ext[i+1] = h_ext[i] - ent_ext*( h_ext[i] - h_env[i] ) *( z[i+1]-z[i] ) 
+                    else:
+                        h[i+1] = h[i]
+                        h_ext[i+1] = h_ext[i]
                 else:
                     raise ValueError("Invalid model_type. Must be 'spectral' or 'zero-buoyancy'.")
             else:
                 h[i+1] = h[i] 
+                h_ext[i+1] = h_ext[i]
                 
             h_u[i+1] = h_u[i]
             
@@ -382,7 +514,7 @@ def spectral_plume(model_type="spectral",T_base = 300., qt_base = 0.0155, p_base
                                 x0=T[i], method="newton"
                             )["root"]
 
-    
+
             # Calculate Undiluted Temperature via root finding algorithm
             T_u[i+1] = root_scalar(lambda x: calc_MSE(x, qv_u[i], p[i+1], z[i+1]) - h_u[i+1],
                                 x0=T_u[i], method="newton"
@@ -392,16 +524,22 @@ def spectral_plume(model_type="spectral",T_base = 300., qt_base = 0.0155, p_base
             T_w[i+1] = root_scalar(lambda x: calc_MSE(x, qv_w[i], p[i+1], z[i+1]) - h_w[i+1],
                                 x0=T_w[i], method="newton"
                             )["root"]
-
+            # Calculate the 90th percentile plume
+            T_ext[i+1] = root_scalar(lambda x: calc_MSE(x, qv_ext[i], p[i+1], z[i+1]) - h_ext[i+1],
+                                x0=T_ext[i], method="newton"
+                            )["root"]
             # Calculate specific humidity
             qv[i+1] = np.minimum(qq_sat(T[i+1],p[i+1]),qv[i])
             
-            # Calculate undilated specific humidity
+            # Calculate undiluted specific humidity
             qv_u[i+1] = np.minimum(qq_sat(T_u[i+1],p[i+1]),qv_u[i])
             
-            # Calculate undilated specific humidity
+            # Calculate weakly diluted specific humidity
             qv_w[i+1] = np.minimum(qq_sat(T_w[i+1],p[i+1]),qv_w[i])
-    
+            
+            # Calculate extreme specific humidity
+            qv_ext[i+1] = np.minimum(qq_sat(T_ext[i+1],p[i+1]),qv_ext[i])
+
     #### end of for loop
     h_w = np.maximum(h_w,h)
     T_w = np.maximum(T_w,T_env)
@@ -409,19 +547,19 @@ def spectral_plume(model_type="spectral",T_base = 300., qt_base = 0.0155, p_base
     qv_w = np.maximum(qv_w,qv)
 
     rhs = qt_base/qq_sat(T_base,p_base)
-    
+
     ### CoPilot helped me explaine the for loop below
     # Adjust environment temperature and humidity below LCL to be 
     # consistent with the assumed relative humidity,
     # which is not guaranteed by the model integration above
     for i in range(0,len(z)):
-        if i<=z_lcl:
-            rh = RH+(rhs-RH)*(z[z_lcl]+z_base-z[i])/z[z_lcl]
+        if i<=zi_lcl:
+            rh = RH+(rhs-RH)*(z[zi_lcl]+z_base-z[i])/z[zi_lcl]
             # Use root finding algorithm with initial guess
             T_env[i] = root_scalar(lambda x: calc_Tv(x, RH, p[i]) - T_rho[i],
-                               x0=T[i] * (1 + 0.61 * RH * qv[i]),
-                               method="newton"
-                               )["root"]
+                                x0=T[i] * (1 + 0.61 * RH * qv[i]),
+                                method="newton"
+                                )["root"]
             
             # Calculate environment humidity based on assumed relative humidity
             es_tmp, _, _ = e_sat(T_env[i])
@@ -434,54 +572,77 @@ def spectral_plume(model_type="spectral",T_base = 300., qt_base = 0.0155, p_base
     h[z>z_top]=np.nan
     T[z>z_top]=np.nan
     T_rho[z>z_top]=np.nan
+    ## calcualte MSE difference between 850 hPa and 500 hPa
+    h850 = calc_MSE_lvl(85000,T,qv,p,z,const)
+    h500 = calc_MSE_lvl(50000,T,qv,p,z,const)
+    dh = h500-h850
+
+    ## Saturation deficit
+    mask = (p <= 85000) & (p >= 50000)
+    z_layer = z[mask]
+    dz = z_layer[-1] - z_layer[0]
+    sat_def = qsat_env[mask] - q_env[mask]
+    deficit_mid = 0.5* (sat_def[:-1]+sat_def[1:])
+    # Height-weighted mean deficit over the selected layer
+    deficit_hwmean = np.sum(deficit_mid * dz) / dz/ 100 ## pressure units are in Pa
     
+    
+    if model_type=='precip':
+            ent_out = ent_p.copy()
+    else:
+        ent_out = ent.copy()
+    
+    if get_plane:
+        return CAPE_u, CAPE_ext, dh, deficit_hwmean #, ent_out[z>z_lcl][0]
+    else:
         
-    df = pd.DataFrame({
-            "z": z,
-            "p": p,
-            "T_rho": T_rho,
-            "T": T,
-            "qv": qv,
-            "h": h,
-            "T_env": T_env,
-            "q_env": q_env,
-            "h_env": h_env,
-            "T_rho_u": T_rho_u,
-            "T_u": T_u,
-            "qv_u": qv_u,
-            "h_u": h_u,
-            "CAPE_u": CAPE_u,
-            "B_u": B_u,
-            "T_rho_w": T_rho_w,
-            "T_w": T_w,
-            "qv_w": qv_w,
-            "h_w": h_w,
-            "CAPE_w": CAPE_w,
-            "B_w": B_w,
-            "ent": ent,
-        })
-    if save_data:
-        df.to_csv(f'{model_type}_output.csv', index=False)
-        
-    if plotting:
-        import matplotlib.pyplot as plt
-        plt.figure(figsize=(7, 8))
+            
+        df = pd.DataFrame({
+                "z": z,
+                "p": p,
+                "T_rho": T_rho,
+                "T": T,
+                "qv": qv,
+                
+                "h": h,
+                "qsat_env":qsat_env,
+                "T_env": T_env,
+                "q_env": q_env,
+                "h_env": h_env,
+                "T_rho_u": T_rho_u,
+                "T_u": T_u,
+                "qv_u": qv_u,
+                "h_u": h_u,
+                "CAPE_u": CAPE_u,
+                "B_u": B_u,
+                "T_rho_w": T_rho_w,
+                "T_w": T_w,
+                "qv_w": qv_w,
+                "h_w": h_w,
+                "CAPE_w": CAPE_w,
+                "B_w": B_w,
+                "ent": ent_out,
+                "dh": dh,
+                "dz": dz,
+                "sat_def": deficit_hwmean,
+            })
+        if save_data:
+            df.to_csv(f'{model_type}_output.csv', index=False)
+            
+        if plotting:
+            import matplotlib.pyplot as plt
+            plt.figure(figsize=(7, 8))
 
-        plt.plot(h/1000,z/1000, "r", label="plume")
-        plt.plot(h_env/1000,z/1000, "b", label="environment")
-        plt.xlabel("MSE (kJ/kg)")
-        plt.ylabel("z (km)")
-        plt.title("Spectral plume profiles")
-        plt.legend()
-        plt.savefig("Spectral_plume_profiles.png", dpi=300)
-    return df
-
-# %%
+            plt.plot(h/1000,z/1000, "r", label="plume")
+            plt.plot(h_env/1000,z/1000, "b", label="environment")
+            plt.xlabel("MSE (kJ/kg)")
+            plt.ylabel("z (km)")
+            plt.title("Spectral plume profiles")
+            plt.legend()
+            plt.savefig("Plume_profiles.png", dpi=300)
+        return df
 
 # %%
 if __name__ == "__main__":
-    output = spectral_plume(model_type="spectral", plotting=True, save_data=True)
-
-# %%
-
-
+    output = spectral_plume_lcl(model_type="precip",P=3,get_plane = False, plotting=True, save_data=True)
+   
