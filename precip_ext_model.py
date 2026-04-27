@@ -593,7 +593,7 @@ def spectral_plume_lcl(model_type="precip",T_base = 300., qt_base = None, p_base
         ent_out = ent.copy()
     
     if get_plane:
-        return CAPE_u, CAPE_ext, dh, deficit_hwmean #, ent_out[z>z_lcl][0]
+        return CAPE_u, CAPE_ext, dh, deficit_hwmean,dz #, ent_out[z>z_lcl][0]
     else:
         
             
