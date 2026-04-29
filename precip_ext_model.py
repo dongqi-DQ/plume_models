@@ -213,7 +213,8 @@ def calc_MSE(T,qt,p,z,const=const):
     hi = const.cpi*(T-const.T0) + const.g*z - (const.Ls0-const.Lv0)
 
     # Calculate moist static energy per unit mass of moist air
-    h = hd*(1-qt) + qv*hv + ql*hl + qi*hi
+    ## Remove liquid and ice effect
+    h = hd*(1-qt) + qv*hv #+ ql*hl + qi*hi
 
     return h
 
@@ -298,7 +299,8 @@ def calc_MSE_lvl(lvl, T,qt,p,z,const=const):
     hi_lvl= const.cpi*(T_lvl-const.T0) + const.g*z_lvl - (const.Ls0-const.Lv0)
 
     # Calculate moist static energy per unit mass of moist air
-    h = hd_lvl*(1-qt_lvl) + qv_lvl*hv_lvl + ql_lvl*hl_lvl + qi_lvl*hi_lvl
+    ## Remove liquid and ice effect
+    h = hd_lvl*(1-qt_lvl) + qv_lvl*hv_lvl # + ql_lvl*hl_lvl + qi_lvl*hi_lvl
 
     return h
 
@@ -310,7 +312,7 @@ def spectral_plume_lcl(model_type="precip",T_base = 300., qt_base = None, p_base
     if qt_base is None :
         check_argument(z_lcl     ,'z_lcl'     ,(int,float), z_base, z_top) # m
         qt_base,_,_ = q0_for_target_lcl_height(T_base,p_base,z_base,z_lcl)
-
+       
         
     ## check input argument types first
     check_argument(model_type,'model_type',(str),       0 , 0)  # 'zero-buoyancy' or 'spectral'
@@ -593,7 +595,7 @@ def spectral_plume_lcl(model_type="precip",T_base = 300., qt_base = None, p_base
         ent_out = ent.copy()
     
     if get_plane:
-        return CAPE_u, CAPE_ext, dh, deficit_hwmean,dz #, ent_out[z>z_lcl][0]
+        return CAPE_u, CAPE_ext, dh, deficit_hwmean #, ent_out[z>z_lcl][0]
     else:
         
             
@@ -646,3 +648,5 @@ def spectral_plume_lcl(model_type="precip",T_base = 300., qt_base = None, p_base
 if __name__ == "__main__":
     output = spectral_plume_lcl(model_type="precip",P=3,get_plane = False, plotting=True, save_data=True)
    
+
+# %%

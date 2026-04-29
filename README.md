@@ -15,4 +15,4 @@ All Python scripts have their own jupyter notebook version (ipynb).
 ### Plotting
 The plotting notebook (plotting.ipynb) create plots in the Palmer plane using the LCL and precipitation based entrainment rate. 
 
-
+The scipy function for plotting may require `scipy==1.16.2`.

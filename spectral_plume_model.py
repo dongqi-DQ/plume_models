@@ -188,7 +188,9 @@ def calc_MSE(T,qt,p,z,const=const):
     hi = const.cpi*(T-const.T0) + const.g*z - (const.Ls0-const.Lv0)
 
     # Calculate moist static energy per unit mass of moist air
-    h = hd*(1-qt) + qv*hv + ql*hl + qi*hi
+    # h = hd*(1-qt) + qv*hv + ql*hl + qi*hi
+    ## SPM doesn't include liquid and ice effect
+    h = hd*(1-qt) + qv*hv
 
     return h
 
@@ -477,11 +479,7 @@ def spectral_plume(model_type="spectral",T_base = 300., qt_base = 0.0155, p_base
     return df
 
 # %%
-
-# %%
 if __name__ == "__main__":
     output = spectral_plume(model_type="spectral", plotting=True, save_data=True)
 
 # %%
-
-
