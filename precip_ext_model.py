@@ -214,7 +214,8 @@ def calc_MSE(T,qt,p,z,const=const):
 
     # Calculate moist static energy per unit mass of moist air
     ## Remove liquid and ice effect
-    h = hd*(1-qt) + qv*hv #+ ql*hl + qi*hi
+    # MS - altered this to assume zero liquid and ice content
+    h = hd*(1-qv) + qv*hv #+ ql*hl + qi*hi
 
     return h
 
@@ -266,11 +267,64 @@ def q0_for_target_lcl_height(T0, p0, z0, z_lcl, const=const):
     """
     Surface specific humidity required so that the parcel LCL is at z_lcl.
     """
-    ### Assuming dry adiabat 
-    Tv_mean = T0 - 1/2 * const.g/const.cp*z_lcl
+
+    # MS - made the calculation of q0 more exact given the LCL height. 
+    # Now it requires an iteration, but convergences in 2-3 iterations.
+    # Doesn't make a lot of difference to the solution.
+
+    # Exner function at level z0
+    pi0 = (p0/const.p00)**(const.Rd/const.cp)
+
+    # Initial guess of specific humidity
+    # Use formula from Wikipedia
+    # z_lcl-z0 = 125*(T(z0)-Td(z0))
+    #
+    # Hence:
+    # Td = T-(z_lcl-z0)/125
+    q0 = qq_sat(T0-(z_lcl-z0)/125.0,p0)
+    dq = 1
+
+    k = 0
+    while dq>1e-8 and k < 10:
+        
+        k = k+1
+      
+   
+
+        # Now use this guess to calculate the virtual potential temperature at z0
+        thetav = T0*(1+q0/const.eps-q0)/pi0
+
+        
+        
+        # Assume environment has uniform virtual potential temperature
+
+        # Integrate: dpi/dz = -g/cp*thetav
+        # Derivation:
+        # dp/dz = -rho*g = -pg/(Rd*Tv) = -pg/(Rd*thetav*pi)
+        # dpi/dp = Rd/cp*pi/p
+        # dpi/dz = -pg/(Rd*thetav*pi) * Rd/cp*pi/p
+
+        pi_lcl = pi0 - const.g/(const.cp*thetav)*(z_lcl-z0)
+        
+        # Calculate pressure of LCL
+        p_lcl = p0*(pi_lcl)**(const.cp/const.Rd)
+
+        
+        # Calculate temperature of LCL
+        T_lcl = T0 * (p_lcl / p0) ** (const.Rd/const.cp)
+        
+        q0_new = qq_sat(T_lcl, p_lcl)
+        
+
+        dq = np.abs(q0_new-q0)
+        q0 = q0_new
+
+
+        
+       
+        
     
-    p_lcl = p_from_z(z0, z_lcl, p0, Tv_mean, const)
-    q0, T_lcl = q0_for_target_lcl(T0, p0, p_lcl, const)
+
     return q0, p_lcl, T_lcl
 
 
@@ -300,15 +354,46 @@ def calc_MSE_lvl(lvl, T,qt,p,z,const=const):
 
     # Calculate moist static energy per unit mass of moist air
     ## Remove liquid and ice effect
-    h = hd_lvl*(1-qt_lvl) + qv_lvl*hv_lvl # + ql_lvl*hl_lvl + qi_lvl*hi_lvl
+    h = hd_lvl*(1-qv_lvl) + qv_lvl*hv_lvl # + ql_lvl*hl_lvl + qi_lvl*hi_lvl
 
     return h
+
+
+# MS: add a function to create a mass flux profile rather than assume constant mass flux
+# A lot of hard coding in the profiles here
+def mass_flux_profile(z,z_lcl,z_top,model_type="constant"):
+   
+   if model_type=="constant":
+       M = np.ones_like(z)
+
+   elif model_type=="tanh":
+
+       M = 0.5 * (1 - np.tanh((z - (z_top-4000.0) ) / 2000.0))
+
+   elif model_type == "cos":
+       
+       M = np.ones_like(z)
+       M[z>10000] = 0.5 * (1 + np.cos(np.pi * (z[z>10000] - 10000.0) / 5000.0))
+
+   elif model_type=="bulge":
+       
+       M = np.ones_like(z)
+       M[z>10000] = 0.5 * (1 + np.cos(np.pi * (z[z>10000] - 10000.0) / 5000.0))
+       hw = (15000-z_lcl)/2;
+       M[z>z_lcl] = M[z>z_lcl] + 0.25*( 1+ np.cos(np.pi*(z[z>z_lcl]-hw-z_lcl)/hw) )
+
+
+   else:
+       raise ValueError(f"Unknown model_type: {model_type}")
+
+   return M
 
 
 # %%
 def spectral_plume_lcl(model_type="precip",T_base = 300., qt_base = None, p_base= 100000., entrain = 0.5, RH = 0.5, 
                         z_base = 50.,z_lcl=1400., z_top = 15000., powerk = 1.0 , deltaz = 50., ent_fac  = 0.18, eta = 0.75, P=3.,
-                        const=const, get_plane=True, plotting = True,save_data=True):
+                        const=const, get_plane=True, plotting = True,save_data=True,
+                        mprofile="const"): # MS add an extra input "mprofile"
     if qt_base is None :
         check_argument(z_lcl     ,'z_lcl'     ,(int,float), z_base, z_top) # m
         qt_base,_,_ = q0_for_target_lcl_height(T_base,p_base,z_base,z_lcl)
@@ -345,8 +430,13 @@ def spectral_plume_lcl(model_type="precip",T_base = 300., qt_base = None, p_base
     # set entrainment rate of the weakly-entrained plume
     ent_w = 0.001*entrain*np.ones_like(z)*ent_fac
     ## entrainment from precipitation
+    
+    # MS - calculate mass flux profile
+    M = mass_flux_profile(z,z_lcl,z_top,model_type=mprofile)
+
     ent_p = np.zeros_like(z)
-    ent_p[z>z_lcl] = (1/z_lcl) * np.log(P/const.P0 * 0.15 * (z[z>z_lcl]-z_lcl)/z_lcl + 1)/ ((z[z>z_lcl]-z_lcl)/z_lcl)
+    # MS - include the mass flux profile in the entrainment calculation
+    ent_p[z>z_lcl] = (1/z_lcl) * np.log(P/const.P0 * M[z>z_lcl] * 0.15 * (z[z>z_lcl]-z_lcl)/z_lcl + 1)/ ((z[z>z_lcl]-z_lcl)/z_lcl)
     ent_p[z<=z_lcl] = 0
     ## Initialize arrays to hold plume properties
     p       = np.zeros_like(z)
@@ -390,6 +480,10 @@ def spectral_plume_lcl(model_type="precip",T_base = 300., qt_base = None, p_base
     T_w[0]  = T_base
     qv_w[0] = qt_base
 
+    # MS - Calculate a spectrum of plumes for plotting purposes
+    ent_spec_frac = np.linspace(0, 0.9, 10)
+    h_spec = np.full((len(z),len(ent_spec_frac)),np.nan)
+
     # extreme 
     T_ext     = np.zeros_like(z)
     T_rho_ext = np.zeros_like(z)
@@ -411,6 +505,9 @@ def spectral_plume_lcl(model_type="precip",T_base = 300., qt_base = None, p_base
     h_u[0]   = h[0]
     h_w[0]   = h[0]
     h_ext[0]   = h[0]
+
+    # MS initialise plume spectrum
+    h_spec[0,:]   = h[0]
 
     ## Flag for LCL level
     LCL = 0
@@ -493,19 +590,33 @@ def spectral_plume_lcl(model_type="precip",T_base = 300., qt_base = None, p_base
                         ## about extreme?
                         ent_ext = ent_p[zi_lcl+1]*0.1
                         h_ext[i+1] = h_ext[i] - ent_ext*( h_ext[i] - h_env[i] ) *( z[i+1]-z[i] ) 
+
+                        # MS - Integrate a spectrum of plumes
+                        ent_spec = ent_p[zi_lcl+1]*ent_spec_frac
+                        for k in range(10):
+                            h_spec[i+1,k] = h_spec[i,k] - ent_spec[k]*(h_spec[i,k]-h_env[i])*( z[i+1]-z[i] )
+
                     else:
                         h[i+1] = h[i]
                         h_ext[i+1] = h_ext[i]
+
+                        # MS - integrate spectrum of plumes
+                        for k in range(10):
+                            h_spec[i+1,k] = h_spec[i,k]
                 else:
                     raise ValueError("Invalid model_type. Must be 'spectral' or 'zero-buoyancy'.")
             else:
                 h[i+1] = h[i] 
                 h_ext[i+1] = h_ext[i]
+
+                # MS - integrate spectrum of plumes
+                for k in range(10):
+                            h_spec[i+1,k] = h_spec[i,k]
                 
             h_u[i+1] = h_u[i]
             
             h_w[i+1] = h_w[i] - ent_w[i]*( h_w[i] - h_env[i] ) *( z[i+1]-z[i] )
-            
+
             logp[i+1] = logp[i] - const.g/(const.Rd*T_rho[i])*( z[i+1]-z[i] )
             
             ## Calculate pressure
@@ -548,7 +659,8 @@ def spectral_plume_lcl(model_type="precip",T_base = 300., qt_base = None, p_base
     T_rho_w = np.maximum(T_rho_w,T_rho)
     qv_w = np.maximum(qv_w,qv)
 
-    rhs = qt_base/qq_sat(T_base,p_base)
+    # Make this a bit more exact
+    rhs = calc_RH(T_base,qt_base,p_base)
 
     ### CoPilot helped me explaine the for loop below
     # Adjust environment temperature and humidity below LCL to be 
@@ -558,7 +670,8 @@ def spectral_plume_lcl(model_type="precip",T_base = 300., qt_base = None, p_base
         if i<=zi_lcl:
             rh = RH+(rhs-RH)*(z[zi_lcl]+z_base-z[i])/z[zi_lcl]
             # Use root finding algorithm with initial guess
-            T_env[i] = root_scalar(lambda x: calc_Tv(x, RH, p[i]) - T_rho[i],
+            # MS - Corrected an error here - use rh (rel. hum. in subcloud layer) instead of RH (rel. hum. in troposphere)
+            T_env[i] = root_scalar(lambda x: calc_Tv(x, rh, p[i]) - T_rho[i],
                                 x0=T[i] * (1 + 0.61 * RH * qv[i]),
                                 method="newton"
                                 )["root"]
@@ -594,8 +707,10 @@ def spectral_plume_lcl(model_type="precip",T_base = 300., qt_base = None, p_base
     else:
         ent_out = ent.copy()
     
+
     if get_plane:
-        return CAPE_u, CAPE_ext, dh, deficit_hwmean, dz#, ent_out[z>z_lcl][0]
+        # MS - Return the entrainment rate as well
+        return CAPE_u, CAPE_ext, dh, deficit_hwmean, dz, ent_out[z>z_lcl][0]
     else:
         
             
@@ -627,6 +742,21 @@ def spectral_plume_lcl(model_type="precip",T_base = 300., qt_base = None, p_base
                 "dh": dh,
                 "dz": dz,
                 "sat_def": deficit_hwmean,
+                # MS - output mass flux profile and plume spectrum MSE
+                "M":M,
+                "ent_ext":ent_ext,
+                "h00":h_spec[:,0],
+                "h01":h_spec[:,1],
+                "h02":h_spec[:,2],
+                "h03":h_spec[:,3],
+                "h04":h_spec[:,4],
+                "h05":h_spec[:,5],
+                "h06":h_spec[:,6],
+                "h07":h_spec[:,7],
+                "h08":h_spec[:,8],
+                "h09":h_spec[:,9],
+
+
             })
         if save_data:
             df.to_csv(f'{model_type}_output.csv', index=False)
@@ -642,7 +772,7 @@ def spectral_plume_lcl(model_type="precip",T_base = 300., qt_base = None, p_base
             plt.title("Spectral plume profiles")
             plt.legend()
             plt.savefig("Plume_profiles.png", dpi=300)
-        return df
+        return df,ent_spec
 
 # %%
 if __name__ == "__main__":
