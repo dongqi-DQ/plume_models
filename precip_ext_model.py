@@ -470,7 +470,7 @@ def spectral_plume_lcl(model_type="precip",T_base = 300., qt_base = None, p_base
     T_u[0]  = T_base
     qv_u[0] = qt_base
 
-    # weakly-entrained plume, as a representation of the extreme convection
+    # weakly-entrained plume
     T_w     = np.zeros_like(z)
     T_rho_w = np.zeros_like(z)
     qv_w    = np.zeros_like(z)
@@ -662,7 +662,7 @@ def spectral_plume_lcl(model_type="precip",T_base = 300., qt_base = None, p_base
     # Make this a bit more exact
     rhs = calc_RH(T_base,qt_base,p_base)
 
-    ### CoPilot helped me explaine the for loop below
+    ### CoPilot helped me explain the for loop below
     # Adjust environment temperature and humidity below LCL to be 
     # consistent with the assumed relative humidity,
     # which is not guaranteed by the model integration above
