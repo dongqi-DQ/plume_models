@@ -1,3 +1,6 @@
+[![DOI](https://zenodo.org/badge/1216454600.svg)](https://doi.org/10.5281/zenodo.21388029)
+
+
 These Python scripts are based on the zero buoyancy plume model by Singh and O'Gorman (2013) and the spectral plume model by Zhou and Xie (2019).
 ## Matlab version:
 
