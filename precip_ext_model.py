@@ -393,7 +393,7 @@ def mass_flux_profile(z,z_lcl,z_top,model_type="constant"):
 def spectral_plume_lcl(model_type="precip",T_base = 300., qt_base = None, p_base= 100000., entrain = 0.5, RH = 0.5, 
                         z_base = 50.,z_lcl=1400., z_top = 15000., powerk = 1.0 , deltaz = 50., ent_fac  = 0.18, eta = 0.75, P=3.,
                         const=const, get_plane=True, plotting = True,save_data=True,
-                        mprofile="const"): # MS add an extra input "mprofile"
+                        mprofile="constant"): # MS add an extra input "mprofile"
     if qt_base is None :
         check_argument(z_lcl     ,'z_lcl'     ,(int,float), z_base, z_top) # m
         qt_base,_,_ = q0_for_target_lcl_height(T_base,p_base,z_base,z_lcl)
