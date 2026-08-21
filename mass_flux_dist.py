@@ -705,6 +705,7 @@ def spectral_plume_skew(model_type="precip",T_base = 300., qt_base = None, p_bas
     
     # DL - estimate entrainment based on mass flux distribution
     ## get a distribution (normalised so that the area under the curve is 1)
+    ## higher number of bins gives a smoother vertical profile, but takes longer to run
     x, gamma_pdf = distribution_profile(nbins=nbins, skew=skew_type)
 
     ## This is just an amplitude to control the peak.
