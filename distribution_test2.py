@@ -19,6 +19,10 @@ from scipy.optimize import root_scalar
 import model_constants as const
 import pandas as pd
 from scipy.stats import gamma,norm 
+from scipy.integrate import cumulative_trapezoid
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 
 # %%
@@ -565,10 +569,44 @@ def calc_MSE_lvl(lvl, T,qt,p,z,const=const):
 
 
 # %%
+# MS: add a function to create a mass flux profile rather than assume constant mass flux
+# A lot of hard coding in the profiles here
+def mass_flux_profile(z,z_lcl,z_top,model_type="constant"):
+   
+   if model_type=="constant":
+       M = np.ones_like(z)
+
+   elif model_type=="tanh":
+
+       M = 0.5 * (1 - np.tanh((z - (z_top-4000.0) ) / 2000.0))
+
+   elif model_type == "cos":
+       
+       M = np.ones_like(z)
+       M[z>10000] = 0.5 * (1 + np.cos(np.pi * (z[z>10000] - 10000.0) / 5000.0))
+
+   elif model_type=="bulge":
+       
+       M = np.ones_like(z)
+       M[z>10000] = 0.5 * (1 + np.cos(np.pi * (z[z>10000] - 10000.0) / 5000.0))
+       hw = (z_top-z_lcl)/2;
+       M[z>z_lcl] = M[z>z_lcl] + 0.25*( 1+ np.cos(np.pi*(z[z>z_lcl]-hw-z_lcl)/hw) )
+
+
+   else:
+       raise ValueError(f"Unknown model_type: {model_type}")
+
+   return M
+
+
+
+
+
+# %%
 def distribution_profile(nbins=50, skew="right"):
     '''
     Generate a distribution of plumes with different entrainment rates.
-    x is normalized from 0 to 1.
+    
     '''
     x = np.linspace(0, 1, nbins)
 
@@ -614,38 +652,7 @@ def distribution_profile(nbins=50, skew="right"):
     return x, pdf
 
 
-
 # %%
-# MS: add a function to create a mass flux profile rather than assume constant mass flux
-# A lot of hard coding in the profiles here
-def mass_flux_profile(z,z_lcl,z_top,model_type="constant"):
-   
-   if model_type=="constant":
-       M = np.ones_like(z)
-
-   elif model_type=="tanh":
-
-       M = 0.5 * (1 - np.tanh((z - (z_top-4000.0) ) / 2000.0))
-
-   elif model_type == "cos":
-       
-       M = np.ones_like(z)
-       M[z>10000] = 0.5 * (1 + np.cos(np.pi * (z[z>10000] - 10000.0) / 5000.0))
-
-   elif model_type=="bulge":
-       
-       M = np.ones_like(z)
-       M[z>10000] = 0.5 * (1 + np.cos(np.pi * (z[z>10000] - 10000.0) / 5000.0))
-       hw = (15000-z_lcl)/2;
-       M[z>z_lcl] = M[z>z_lcl] + 0.25*( 1+ np.cos(np.pi*(z[z>z_lcl]-hw-z_lcl)/hw) )
-
-
-   else:
-       raise ValueError(f"Unknown model_type: {model_type}")
-
-   return M
-
-
 # %%
 def spectral_plume_skew(model_type="precip",T_base = 300., qt_base = None, p_base= 100000., entrain = 0.5, RH = 0.5, 
                         z_base = 50.,z_lcl=1400., z_top = 15000., powerk = 1.0 , deltaz = 50., ent_fac  = 0.18, eta = 0.75, P=3.,
@@ -695,6 +702,43 @@ def spectral_plume_skew(model_type="precip",T_base = 300., qt_base = None, p_bas
     # MS - include the mass flux profile in the entrainment calculation
     ent_p[z>z_lcl] = (1/z_lcl) * np.log(P/const.P0 * M[z>z_lcl] * 0.15 * (z[z>z_lcl]-z_lcl)/z_lcl + 1)/ ((z[z>z_lcl]-z_lcl)/z_lcl)
     ent_p[z<=z_lcl] = 0
+    
+    # DL - estimate entrainment based on mass flux distribution
+    ## get a distribution (normalised so that the area under the curve is 1)
+    x, gamma_pdf = distribution_profile(nbins=200, skew=skew_type)
+
+    ## This is just an amplitude to control the peak.
+    amp = z_lcl/0.02
+
+    max_pdf_norm = np.max(gamma_pdf)
+
+    ent_max = max_pdf_norm * (P / amp)
+    ## We then get to know how far the entrainment rate extends 
+    ent_spec = x * ent_max
+
+    ## And we have the distribution of cloud base mass flux
+    mb_spec = amp * gamma_pdf / max_pdf_norm
+
+    ## in this case np.trapz(mb_spec, ent_spec) should be equal to the total mass flux at cloud base (P)
+    ent_p_dist = np.zeros_like(z)
+    for i in range(len(z)):
+        mass_sum = 0.0
+        # required mass flux at this height
+        M_target = P * M[i]
+        ## No entrainment below the cloud base
+        if z[i] <= z_lcl:
+            ent_p_dist[i] = 0.0
+            continue
+        for k in range(len(ent_spec)):
+
+            contribution = ( mb_spec[k]  * np.exp(ent_spec[k] * (z[i] - z_lcl))  * np.diff(ent_spec)[0] )
+
+            mass_sum += contribution
+
+            if mass_sum >= M_target:
+                ent_p_dist[i] = ent_spec[k]
+                break
+       
     ## Initialize arrays to hold plume properties
     p       = np.zeros_like(z)
     logp    = np.zeros_like(z)
@@ -742,10 +786,7 @@ def spectral_plume_skew(model_type="precip",T_base = 300., qt_base = None, p_bas
     h_spec = np.full((len(z),len(ent_spec_frac)),np.nan)
 
     # DL - distribution of plumes
-    x,pdf = distribution_profile(nbins=50, skew=skew_type)
-    weights = pdf / pdf.sum()
-    h_dist = np.full((len(z),len(x)),np.nan)
-    h_dist_tot = np.zeros_like(z)
+    h_dist = np.zeros_like(z)
 
     # extreme 
     T_ext     = np.zeros_like(z)
@@ -773,16 +814,14 @@ def spectral_plume_skew(model_type="precip",T_base = 300., qt_base = None, p_bas
     h_spec[0,:]   = h[0]
 
     # DL initialise distribution of plumes
-    h_dist[0,:]   = h[0]
-    h_dist_tot[0] = h[0]
-    T_dist_tot     = np.zeros_like(z)
-    T_rho_dist_tot = np.zeros_like(z)
-    qv_dist_tot    = np.zeros_like(z)
-    h_dist_tot     = np.zeros_like(z)
-    B_dist_tot     = np.zeros_like(z)
-    CAPE_dist_tot  = 0.
-    T_dist_tot[0]  = T_base
-    qv_dist_tot[0] = qt_base
+    h_dist[0]      = h[0]
+    T_dist     = np.zeros_like(z)
+    T_rho_dist = np.zeros_like(z)
+    qv_dist    = np.zeros_like(z)
+    B_dist     = np.zeros_like(z)
+    CAPE_dist  = 0.
+    T_dist[0]  = T_base
+    qv_dist[0] = qt_base
 
 
     ## Flag for LCL level
@@ -807,16 +846,16 @@ def spectral_plume_skew(model_type="precip",T_base = 300., qt_base = None, p_bas
         CAPE_ext = CAPE_ext+np.maximum(B_ext[i],0)*deltaz
         
         ## DL For distribution 
-        T_rho_dist_tot[i] = T_dist_tot[i]*(1+qv_dist_tot[i]/const.eps-qv_dist_tot[i])
-        B_dist_tot[i] = const.g*(T_rho_dist_tot[i]-T_rho[i])/T_rho[i]
-        CAPE_dist_tot = CAPE_dist_tot+np.maximum(B_dist_tot[i],0)*deltaz
+        T_rho_dist[i] = T_dist[i]*(1+qv_dist[i]/const.eps-qv_dist[i])
+        B_dist[i] = const.g*(T_rho_dist[i]-T_rho[i])/T_rho[i]
+        CAPE_dist = CAPE_dist+np.maximum(B_dist[i],0)*deltaz
         
         # Calculate plume saturation specific humidity
         qsat[i] = qq_sat(T[i],p[i])
         
         # Calculate environment properties
-        T_env[i] = root_scalar(lambda x: calc_Tv(x, RH, p[i]) - T_rho[i],
-                                x0=T[i] * (1 + 0.61 * RH * qv[i]),
+        T_env[i] = root_scalar(lambda x: calc_Tv(x, RH, p[i]) - T_rho_dist[i],
+                                x0=T_dist[i] * (1 + 0.61 * RH * qv_dist[i]),
                                 method="newton"
                                 )["root"]
         
@@ -864,22 +903,22 @@ def spectral_plume_skew(model_type="precip",T_base = 300., qt_base = None, p_bas
                     if ent_p[i]!=0.:
                         if z[i]<z_top:
                             dent = (ent_p[i]-ent_p[i-1])/ent_p[i]
+                            dent_dist = (ent_p_dist[i]-ent_p_dist[i-1])/ent_p_dist[i]
                         else:
                             dent = 0.
+                            dent_dist = 0.
                         h[i+1] = h[i] - ent_p[i]*( h[i] - h_env[i] ) *( z[i+1]-z[i] ) - (h[0] - h[i])*dent/(1+eta*ent_p[i]*(z[i]-z_lcl))
                         ## about extreme?
-                        ent_ext = ent_p[zi_lcl+1]*0.1
+                        ent_ext = ent_p_dist[zi_lcl+1]*0.1
                         h_ext[i+1] = h_ext[i] - ent_ext*( h_ext[i] - h_env[i] ) *( z[i+1]-z[i] ) 
 
                         # MS - Integrate a spectrum of plumes
                         ent_spec = ent_p[zi_lcl+1]*ent_spec_frac
                         for k in range(10):
                             h_spec[i+1,k] = h_spec[i,k] - ent_spec[k]*(h_spec[i,k]-h_env[i])*( z[i+1]-z[i] )
-                        # DL - add distribution to the plumes
-                        ent_dist = ent_p[zi_lcl+1]*x
-                        for k in range(len(x)):
-                            h_dist[i+1, k] = (h_dist[i, k] - ent_dist[k] * (h_dist[i, k] - h_env[i]) * (z[i+1] - z[i]) )
-                        h_dist_tot[i+1] = np.sum( h_dist[i+1, :] * weights )
+                        # DL - using the distribution
+                        
+                        h_dist[i+1] = h_dist[i] - ent_p_dist[i]*( h_dist[i] - h_env[i] ) *( z[i+1]-z[i] ) - (h_dist[0] - h_dist[i])*dent_dist/(1+eta*ent_p_dist[i]*(z[i]-z_lcl))
                     else:
                         h[i+1] = h[i]
                         h_ext[i+1] = h_ext[i]
@@ -888,22 +927,19 @@ def spectral_plume_skew(model_type="precip",T_base = 300., qt_base = None, p_bas
                         for k in range(10):
                             h_spec[i+1,k] = h_spec[i,k]
                         ## DL -integrate distribution of plumes
-                        for k in range(len(x)):
-                            h_dist[i+1, k] = h_dist[i, k]
-                        h_dist_tot[i+1] = np.sum( h_dist[i+1, :] * weights )
+                        h_dist[i+1] = h_dist[i]
                 else:
                     raise ValueError("Invalid model_type. Must be 'spectral' or 'zero-buoyancy'.")
             else:
                 h[i+1] = h[i] 
                 h_ext[i+1] = h_ext[i]
-
+                
                 # MS - integrate spectrum of plumes
                 for k in range(10):
                             h_spec[i+1,k] = h_spec[i,k]
                 # DL - integrate distribution of plumes
-                for k in range(len(x)):
-                    h_dist[i+1, k] = h_dist[i, k]
-                h_dist_tot[i+1] = np.sum( h_dist[i+1, :] * weights )
+                h_dist[i+1] = h_dist[i]
+                
                 
             h_u[i+1] = h_u[i]
             
@@ -934,8 +970,8 @@ def spectral_plume_skew(model_type="precip",T_base = 300., qt_base = None, p_bas
                                 x0=T_ext[i], method="newton"
                             )["root"]
             # Calculate the sum of plume distribution
-            T_dist_tot[i+1] = root_scalar(lambda x: calc_MSE(x, qv_dist_tot[i], p[i+1], z[i+1]) - h_dist_tot[i+1],
-                                x0=T_dist_tot[i], method="newton"
+            T_dist[i+1] = root_scalar(lambda x: calc_MSE(x, qv_dist[i], p[i+1], z[i+1]) - h_dist[i+1],
+                                x0=T_dist[i], method="newton"
                             )["root"]
             # Calculate specific humidity
             qv[i+1] = np.minimum(qq_sat(T[i+1],p[i+1]),qv[i])
@@ -950,7 +986,7 @@ def spectral_plume_skew(model_type="precip",T_base = 300., qt_base = None, p_bas
             qv_ext[i+1] = np.minimum(qq_sat(T_ext[i+1],p[i+1]),qv_ext[i])
             
             # Calculate plume distribution specific humidity
-            qv_dist_tot[i+1] = np.minimum(qq_sat(T_ext[i+1],p[i+1]),qv_dist_tot[i])
+            qv_dist[i+1] = np.minimum(qq_sat(T_ext[i+1],p[i+1]),qv_dist[i])
 
     #### end of for loop
     h_w = np.maximum(h_w,h)
@@ -1009,7 +1045,7 @@ def spectral_plume_skew(model_type="precip",T_base = 300., qt_base = None, p_bas
 
     if get_plane:
         # MS - Return the entrainment rate as well
-        return CAPE_u, CAPE_ext, CAPE_dist_tot, dh, deficit_hwmean, dz, ent_out[z>z_lcl][0]
+        return CAPE_u, CAPE_ext, CAPE_dist, dh, deficit_hwmean, dz, ent_out[z>z_lcl][0]
     else:
         
             
@@ -1042,12 +1078,12 @@ def spectral_plume_skew(model_type="precip",T_base = 300., qt_base = None, p_bas
                 "h_ext": h_ext,
                 "CAPE_ext": CAPE_ext,
                 "B_ext": B_ext,
-                "T_rho_dist": T_rho_dist_tot,
-                "T_dist": T_dist_tot,
-                "qv_dist": qv_dist_tot,
-                "h_dist": h_dist_tot,
-                "CAPE_dist": CAPE_dist_tot,
-                "B_dist": B_dist_tot,
+                "T_rho_dist": T_rho_dist,
+                "T_dist": T_dist,
+                "qv_dist": qv_dist,
+                "h_dist": h_dist,
+                "CAPE_dist": CAPE_dist,
+                "B_dist": B_dist,
                 "ent": ent_out,
                 "dh": dh,
                 "dz": dz,
@@ -1073,21 +1109,33 @@ def spectral_plume_skew(model_type="precip",T_base = 300., qt_base = None, p_bas
             
         if plotting:
             import matplotlib.pyplot as plt
-            plt.figure(figsize=(7, 8))
-
-            plt.plot(h/1000,z/1000, "r", label="plume")
+            plt.figure(figsize=(14, 6))
+            plt.subplot(121)
+            plt.plot(h_dist/1000,z/1000, "r", label="distribution")
+            plt.plot(h/1000,z/1000, "g", label="plume")
             plt.plot(h_env/1000,z/1000, "b", label="environment")
             plt.xlabel("MSE (kJ/kg)")
             plt.ylabel("z (km)")
             plt.title("Spectral plume profiles")
             plt.legend()
+            plt.subplot(122)
+            plt.plot(ent_p_dist,z/1000, "g", label="distribution mass flux")
+            plt.plot(ent_p,z/1000, "r", label="uniform mass flux")
+            plt.xlabel("Entrainment rate (1/km)")
+            plt.ylabel("z (km)")
+            plt.legend()
+            plt.tight_layout()
             plt.savefig("Plume_profiles.png", dpi=300)
         return df,ent_spec
 
-
 # %%
 if __name__ == "__main__":
-    output = spectral_plume_skew(model_type="precip",P=3,get_plane = False, plotting=True, save_data=True)
+    output = spectral_plume_skew(model_type="precip",P=6,z_lcl=700,get_plane = False, 
+                                 plotting=True, save_data=False,mprofile="cos",skew_type = "normal")
   
+
+# %%
+
+# %%
 
 # %%
