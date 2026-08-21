@@ -655,7 +655,7 @@ def distribution_profile(nbins=50, skew="right"):
 # %%
 # %%
 def spectral_plume_skew(model_type="precip",T_base = 300., qt_base = None, p_base= 100000., entrain = 0.5, RH = 0.5, 
-                        z_base = 50.,z_lcl=1400., z_top = 15000., powerk = 1.0 , deltaz = 50., ent_fac  = 0.18, eta = 0.75, P=3.,
+                        z_base = 50.,z_lcl=1400., z_top = 15000., powerk = 1.0 , deltaz = 50., ent_fac  = 0.18, eta = 0.75, P=3., nbins=200,
                         const=const, get_plane=True, plotting = True,save_data=True,
                         mprofile="cos",skew_type = "normal"): # MS add an extra input "mprofile"
     if qt_base is None :
@@ -705,7 +705,7 @@ def spectral_plume_skew(model_type="precip",T_base = 300., qt_base = None, p_bas
     
     # DL - estimate entrainment based on mass flux distribution
     ## get a distribution (normalised so that the area under the curve is 1)
-    x, gamma_pdf = distribution_profile(nbins=200, skew=skew_type)
+    x, gamma_pdf = distribution_profile(nbins=nbins, skew=skew_type)
 
     ## This is just an amplitude to control the peak.
     amp = z_lcl/0.02
@@ -1038,7 +1038,7 @@ def spectral_plume_skew(model_type="precip",T_base = 300., qt_base = None, p_bas
     
     
     if model_type=='precip':
-            ent_out = ent_p.copy()
+            ent_out = ent_p_dist.copy()
     else:
         ent_out = ent.copy()
     
