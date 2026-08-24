@@ -709,11 +709,11 @@ def spectral_plume_skew(model_type="precip",T_base = 300., qt_base = None, p_bas
     x, gamma_pdf = distribution_profile(nbins=nbins, skew=skew_type)
 
     ## This is just an amplitude to control the peak.
-    amp = z_lcl/0.02
+    amp = z_lcl/0.06
 
     max_pdf_norm = np.max(gamma_pdf)
 
-    ent_max = max_pdf_norm * (P / amp)
+    ent_max = max_pdf_norm * (P/const.P0 / amp)
     ## We then get to know how far the entrainment rate extends 
     ent_spec = x * ent_max
 
@@ -725,7 +725,7 @@ def spectral_plume_skew(model_type="precip",T_base = 300., qt_base = None, p_bas
     for i in range(len(z)):
         mass_sum = 0.0
         # required mass flux at this height
-        M_target = P * M[i]
+        M_target = P/const.P0 * M[i]
         ## No entrainment below the cloud base
         if z[i] <= z_lcl:
             ent_p_dist[i] = 0.0
