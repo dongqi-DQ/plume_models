@@ -666,7 +666,7 @@ def spectral_plume_linear(model_type="precip",T_base = 300., qt_base = None, p_b
     if skew_type == "linear-increase":
         mb_spec = a * ent_spec +b
     elif skew_type == "linear-decrease":
-        mb_spec = -a*ent_spec+a*ent_b+b
+        mb_spec = -a*ent_spec+10*b
    
 
     ## in this case np.trapz(mb_spec, ent_spec) should be equal to the total mass flux at cloud base (P)
@@ -1085,8 +1085,8 @@ def spectral_plume_linear(model_type="precip",T_base = 300., qt_base = None, p_b
 
 # %%
 if __name__ == "__main__":
-    output = spectral_plume_linear(model_type="precip",P=3,z_lcl=700,get_plane = False, 
-                                 plotting=True, save_data=False,mprofile="cos",skew_type = "linear-increase")
+    output = spectral_plume_linear(model_type="precip",P=16,z_lcl=700,get_plane = False, 
+                                 plotting=True, save_data=False,mprofile="cos",skew_type = "linear-decrease")
   
 
 # %%
