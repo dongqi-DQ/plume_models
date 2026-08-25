@@ -558,37 +558,27 @@ def distribution_profile(nbins=50, skew="right"):
     
     if skew == "right":
         pdf = gamma.pdf(x, a=shape, scale=scale)
-        Afac = 0.04
+        Afac=0.0325
     elif skew == "normal":
         mu = 0.5
         pdf = norm.pdf(x, loc=mu, scale=sigma)
-        Afac = 0.04
+        Afac=0.0325
     elif skew == "left":
         # mirror the right-skewed gamma around x = 0.5
         pdf = gamma.pdf(1 - x, a=shape, scale=scale)
-        Afac = 0.04
+        Afac=0.0325
     elif skew == "strong-low-entrain":
         # exponential-like: maximum at x = 0
         shape_low = 1
         scale_low = 0.1
         pdf = gamma.pdf(x, a=shape_low, scale=scale_low)
-        Afac = 0.04
+        Afac=0.0325
     elif skew == "strong-high-entrain":
         # mirrored exponential-like distribution
         shape_high = 1
         scale_high = 0.1
         pdf = gamma.pdf(1 - x, a=shape_high, scale=scale_high)
-        Afac = 0.04
-    elif skew == "linear-increase":
-        pdf = slope*x+intercept
-        ## normalise
-        pdf = pdf/np.trapz(pdf,x)
-        Afac = 0.075
-    elif skew == "linear-decrease":
-        pdf = slope*(1-x)+intercept
-        ## normalise
-        pdf = pdf/np.trapz(pdf,x)
-        Afac = 0.075
+        Afac=0.0325
     else:
         raise ValueError(
             f"Input: {skew} is not a valid option. "
@@ -640,24 +630,24 @@ def get_linear(P, z_lcl,skew_type="linear-increase",nbins=200,const=const):
 plt.figure(figsize=(12,5))
 P=3
 z_lcl=700
-# plt.plot(*get_mass_pdf(P, z_lcl, skew_type="normal"), label=f"P={P}, z_lcl={z_lcl} m")
+plt.plot(*get_mass_pdf(P, z_lcl, skew_type="normal"), label=f"P={P}, z_lcl={z_lcl} m")
 
-# plt.plot(*get_mass_pdf(P, z_lcl, skew_type="left"), color="r", label=f"P={P}, z_lcl={z_lcl} m, left-skewed")
-# plt.plot(*get_mass_pdf(P, z_lcl, skew_type="right"), color="b", label=f"P={P}, z_lcl={z_lcl} m, right-skewed")
-# plt.plot(*get_mass_pdf(P, z_lcl, skew_type="strong-low-entrain"), color="k", label=f"P={P}, z_lcl={z_lcl} m, right-skewed")
+plt.plot(*get_mass_pdf(P, z_lcl, skew_type="left"), color="r", label=f"P={P}, z_lcl={z_lcl} m, left-skewed")
+plt.plot(*get_mass_pdf(P, z_lcl, skew_type="right"), color="b", label=f"P={P}, z_lcl={z_lcl} m, right-skewed")
+plt.plot(*get_mass_pdf(P, z_lcl, skew_type="strong-low-entrain"), color="k", label=f"P={P}, z_lcl={z_lcl} m, right-skewed")
 
 plt.plot(*get_linear(P, z_lcl), "r--", label=f"P={P}, z_lcl={z_lcl} m, linear-increase",linewidth=3,zorder=10)
 
 P=6
 z_lcl=700
-# plt.plot(*get_mass_pdf(P, z_lcl, skew_type="normal"), label=f"P={P}, z_lcl={z_lcl} m",color="green")
+plt.plot(*get_mass_pdf(P, z_lcl, skew_type="normal"), label=f"P={P}, z_lcl={z_lcl} m",color="green")
 plt.plot(*get_linear(P, z_lcl), "b.-", label=f"P={P}, z_lcl={z_lcl} m, linear-increase")
 plt.plot(*get_linear(P, z_lcl,skew_type="linear-decrease"), "b.-", label=f"P={P}, z_lcl={z_lcl} m, linear-decrease")
 # plt.plot(np.linspace(0,emax), -700*np.linspace(0,emax)+5*700+700*emax,"k--")
 P=3
 z_lcl=1400
-# plt.plot(*get_mass_pdf(P, z_lcl, skew_type="normal"), label=f"P={P}, z_lcl={z_lcl} m",color="orange")
-# plt.plot(*get_linear(P, z_lcl), ".-", label=f"P={P}, z_lcl={z_lcl} m, linear-increase",color="orange")
+plt.plot(*get_mass_pdf(P, z_lcl, skew_type="normal"), label=f"P={P}, z_lcl={z_lcl} m",color="orange")
+plt.plot(*get_linear(P, z_lcl), ".-", label=f"P={P}, z_lcl={z_lcl} m, linear-increase",color="orange")
 plt.legend()
 plt.xlabel(r"Entrainment rate $\epsilon$ (km$^{-1}$)")
 plt.ylabel(r"Cloud-base mass-flux density $m_b(\epsilon)$")
