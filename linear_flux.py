@@ -640,7 +640,7 @@ def spectral_plume_linear(model_type="precip",T_base = 300., qt_base = None, p_b
     # plume at this level z, decreasing with height as this function
     # For spectral plume model, it defines the entraiment rate of the plume
     # that detrains at this level z
-    ent = 0.001*entrain*np.minimum(1.,np.maximum(0.,(z_top-z)/z_top))**powerk
+    ent = 0.001*entrain*np.minimum(1.,np.fmax(0.,(z_top-z)/z_top))**powerk
     # set entrainment rate of the weakly-entrained plume
     ent_w = 0.001*entrain*np.ones_like(z)*ent_fac
     ## entrainment from precipitation
@@ -656,7 +656,7 @@ def spectral_plume_linear(model_type="precip",T_base = 300., qt_base = None, p_b
     # DL - estimate entrainment based on mass flux distribution
     ## get a linear distribution
     
-    b = z_lcl*5
+    b = z_lcl*3
 
     a = 9.5e6
     ent_b = (-b +np.sqrt(b**2+2*a*(P/const.P0)) )/a
@@ -783,22 +783,22 @@ def spectral_plume_linear(model_type="precip",T_base = 300., qt_base = None, p_b
         T_rho_u[i] = T_u[i]*(1+qv_u[i]/const.eps-qv_u[i])
         
         B_u[i] = const.g*(T_rho_u[i]-T_rho[i])/T_rho[i]
-        CAPE_u = CAPE_u+B_u[i]*deltaz
+        CAPE_u = CAPE_u+np.fmax(B_u[i],0)*deltaz
         
         # Calculate weakly-entrained plume density temperature, buoyancy and CAPE
         T_rho_w[i] = T_w[i]*(1+qv_w[i]/const.eps-qv_w[i])
         B_w[i] = const.g*(T_rho_w[i]-T_rho[i])/T_rho[i]
-        CAPE_w = CAPE_w+np.maximum(B_w[i],0)*deltaz
+        CAPE_w = CAPE_w+np.fmax(B_w[i],0)*deltaz
         
         ## For extreme
         T_rho_ext[i] = T_ext[i]*(1+qv_ext[i]/const.eps-qv_ext[i])
         B_ext[i] = const.g*(T_rho_ext[i]-T_rho[i])/T_rho[i]
-        CAPE_ext = CAPE_ext+np.maximum(B_ext[i],0)*deltaz
+        CAPE_ext = CAPE_ext+np.fmax(B_ext[i],0)*deltaz
         
         ## DL For distribution 
         T_rho_dist[i] = T_dist[i]*(1+qv_dist[i]/const.eps-qv_dist[i])
         B_dist[i] = const.g*(T_rho_dist[i]-T_rho[i])/T_rho[i]
-        CAPE_dist = CAPE_dist+np.maximum(B_dist[i],0)*deltaz
+        CAPE_dist = CAPE_dist+np.fmax(B_dist[i],0)*deltaz
         
         # Calculate plume saturation specific humidity
         qsat[i] = qq_sat(T[i],p[i])
@@ -939,10 +939,10 @@ def spectral_plume_linear(model_type="precip",T_base = 300., qt_base = None, p_b
             qv_dist[i+1] = np.minimum(qq_sat(T_ext[i+1],p[i+1]),qv_dist[i])
 
     #### end of for loop
-    h_w = np.maximum(h_w,h)
-    T_w = np.maximum(T_w,T_env)
-    T_rho_w = np.maximum(T_rho_w,T_rho)
-    qv_w = np.maximum(qv_w,qv)
+    h_w = np.fmax(h_w,h)
+    T_w = np.fmax(T_w,T_env)
+    T_rho_w = np.fmax(T_rho_w,T_rho)
+    qv_w = np.fmax(qv_w,qv)
 
     # Make this a bit more exact
     rhs = calc_RH(T_base,qt_base,p_base)
@@ -985,6 +985,7 @@ def spectral_plume_linear(model_type="precip",T_base = 300., qt_base = None, p_b
     deficit_mid = 0.5* (sat_def[:-1]+sat_def[1:])
     # Height-weighted mean deficit over the selected layer
     deficit_hwmean = np.sum(deficit_mid * dz) / dz/ 100 ## pressure units are in Pa
+    
     
     
     if model_type=='precip':
@@ -1035,6 +1036,7 @@ def spectral_plume_linear(model_type="precip",T_base = 300., qt_base = None, p_b
                 "CAPE_dist": CAPE_dist,
                 "B_dist": B_dist,
                 "ent": ent_out,
+                "ent_uniform": ent_p,
                 "dh": dh,
                 "dz": dz,
                 "sat_def": deficit_hwmean,
@@ -1069,26 +1071,24 @@ def spectral_plume_linear(model_type="precip",T_base = 300., qt_base = None, p_b
             plt.title("Spectral plume profiles")
             plt.legend()
             plt.subplot(222)
-            plt.plot(ent_p_dist,z/1000, "r", label="distribution mass flux")
-            plt.plot(ent_p,z/1000, "g", label="uniform mass flux")
+            plt.plot(ent_p_dist*1000,z/1000, "r", label="distribution mass flux")
+            plt.plot(ent_p*1000,z/1000, "g", label="uniform mass flux")
             plt.xlabel("Entrainment rate (1/km)")
             plt.ylabel("z (km)")
             plt.legend()
             plt.subplot(223)
-            plt.plot(ent_spec, mb_spec, "r", label="distribution")
+            plt.plot(ent_spec*1000, mb_spec, "r", label="distribution")
             plt.xlabel("Entrainment rate (1/km)")
             plt.ylabel("mb")
             plt.legend()
             plt.tight_layout()
             plt.savefig("Plume_profiles.png", dpi=300)
-        return df,ent_spec
+        return df,B_u
 
 # %%
 if __name__ == "__main__":
-    output = spectral_plume_linear(model_type="precip",P=16,z_lcl=700,get_plane = False, 
+    output = spectral_plume_linear(model_type="precip",P=30,z_lcl=700,get_plane = False, 
                                  plotting=True, save_data=False,mprofile="cos",skew_type = "linear-decrease")
   
-
-# %%
 
 # %%

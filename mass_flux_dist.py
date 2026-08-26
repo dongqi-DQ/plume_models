@@ -617,39 +617,28 @@ def distribution_profile(nbins=50, skew="right"):
     # standard deviation for the central normal case
     sigma = np.sqrt(shape) * scale
 
+    slope = 1
+    intercept = 0.5
+    
     if skew == "right":
         pdf = gamma.pdf(x, a=shape, scale=scale)
-
+        Afac=0.05
     elif skew == "normal":
         mu = 0.5
         pdf = norm.pdf(x, loc=mu, scale=sigma)
-
+        Afac=0.05
     elif skew == "left":
         # mirror the right-skewed gamma around x = 0.5
         pdf = gamma.pdf(1 - x, a=shape, scale=scale)
-
-    elif skew == "strong-low-entrain":
-        # exponential-like: maximum at x = 0
-        shape_low = 1
-        scale_low = 0.1
-        pdf = gamma.pdf(x, a=shape_low, scale=scale_low)
-
-    elif skew == "strong-high-entrain":
-        # mirrored exponential-like distribution
-        shape_high = 1
-        scale_high = 0.1
-        pdf = gamma.pdf(1 - x, a=shape_high, scale=scale_high)
-
+        Afac=0.05
     else:
         raise ValueError(
             f"Input: {skew} is not a valid option. "
             "Choose from 'right', 'normal', 'left', "
             "'strong-low-entrain', or 'strong-high-entrain'."
         )
-
-
-
-    return x, pdf
+    
+    return x, pdf, Afac
 
 
 # %%
@@ -690,7 +679,7 @@ def spectral_plume_skew(model_type="precip",T_base = 300., qt_base = None, p_bas
     # plume at this level z, decreasing with height as this function
     # For spectral plume model, it defines the entraiment rate of the plume
     # that detrains at this level z
-    ent = 0.001*entrain*np.minimum(1.,np.maximum(0.,(z_top-z)/z_top))**powerk
+    ent = 0.001*entrain*np.minimum(1.,np.fmax(0.,(z_top-z)/z_top))**powerk
     # set entrainment rate of the weakly-entrained plume
     ent_w = 0.001*entrain*np.ones_like(z)*ent_fac
     ## entrainment from precipitation
@@ -706,10 +695,10 @@ def spectral_plume_skew(model_type="precip",T_base = 300., qt_base = None, p_bas
     # DL - estimate entrainment based on mass flux distribution
     ## get a distribution (normalised so that the area under the curve is 1)
     ## higher number of bins gives a smoother vertical profile, but takes longer to run
-    x, gamma_pdf = distribution_profile(nbins=nbins, skew=skew_type)
+    x, gamma_pdf, Afac = distribution_profile(nbins=nbins, skew=skew_type)
 
     ## This is just an amplitude to control the peak.
-    amp = z_lcl/0.06
+    amp = z_lcl/Afac
 
     max_pdf_norm = np.max(gamma_pdf)
 
@@ -834,22 +823,22 @@ def spectral_plume_skew(model_type="precip",T_base = 300., qt_base = None, p_bas
         T_rho_u[i] = T_u[i]*(1+qv_u[i]/const.eps-qv_u[i])
         
         B_u[i] = const.g*(T_rho_u[i]-T_rho[i])/T_rho[i]
-        CAPE_u = CAPE_u+B_u[i]*deltaz
+        CAPE_u = CAPE_u+np.fmax(B_u[i],0)*deltaz
         
         # Calculate weakly-entrained plume density temperature, buoyancy and CAPE
         T_rho_w[i] = T_w[i]*(1+qv_w[i]/const.eps-qv_w[i])
         B_w[i] = const.g*(T_rho_w[i]-T_rho[i])/T_rho[i]
-        CAPE_w = CAPE_w+np.maximum(B_w[i],0)*deltaz
+        CAPE_w = CAPE_w+np.fmax(B_w[i],0)*deltaz
         
         ## For extreme
         T_rho_ext[i] = T_ext[i]*(1+qv_ext[i]/const.eps-qv_ext[i])
         B_ext[i] = const.g*(T_rho_ext[i]-T_rho[i])/T_rho[i]
-        CAPE_ext = CAPE_ext+np.maximum(B_ext[i],0)*deltaz
+        CAPE_ext = CAPE_ext+np.fmax(B_ext[i],0)*deltaz
         
         ## DL For distribution 
         T_rho_dist[i] = T_dist[i]*(1+qv_dist[i]/const.eps-qv_dist[i])
         B_dist[i] = const.g*(T_rho_dist[i]-T_rho[i])/T_rho[i]
-        CAPE_dist = CAPE_dist+np.maximum(B_dist[i],0)*deltaz
+        CAPE_dist = CAPE_dist+np.fmax(B_dist[i],0)*deltaz
         
         # Calculate plume saturation specific humidity
         qsat[i] = qq_sat(T[i],p[i])
@@ -990,10 +979,10 @@ def spectral_plume_skew(model_type="precip",T_base = 300., qt_base = None, p_bas
             qv_dist[i+1] = np.minimum(qq_sat(T_ext[i+1],p[i+1]),qv_dist[i])
 
     #### end of for loop
-    h_w = np.maximum(h_w,h)
-    T_w = np.maximum(T_w,T_env)
-    T_rho_w = np.maximum(T_rho_w,T_rho)
-    qv_w = np.maximum(qv_w,qv)
+    h_w = np.fmax(h_w,h)
+    T_w = np.fmax(T_w,T_env)
+    T_rho_w = np.fmax(T_rho_w,T_rho)
+    qv_w = np.fmax(qv_w,qv)
 
     # Make this a bit more exact
     rhs = calc_RH(T_base,qt_base,p_base)
@@ -1086,6 +1075,7 @@ def spectral_plume_skew(model_type="precip",T_base = 300., qt_base = None, p_bas
                 "CAPE_dist": CAPE_dist,
                 "B_dist": B_dist,
                 "ent": ent_out,
+                "ent_uniform": ent_p,
                 "dh": dh,
                 "dz": dz,
                 "sat_def": deficit_hwmean,
@@ -1120,8 +1110,8 @@ def spectral_plume_skew(model_type="precip",T_base = 300., qt_base = None, p_bas
             plt.title("Spectral plume profiles")
             plt.legend()
             plt.subplot(122)
-            plt.plot(ent_p_dist,z/1000, "g", label="distribution mass flux")
-            plt.plot(ent_p,z/1000, "r", label="uniform mass flux")
+            plt.plot(ent_p_dist,z/1000, "r", label="distribution mass flux")
+            plt.plot(ent_p,z/1000, "g", label="uniform mass flux")
             plt.xlabel("Entrainment rate (1/km)")
             plt.ylabel("z (km)")
             plt.legend()
@@ -1131,7 +1121,7 @@ def spectral_plume_skew(model_type="precip",T_base = 300., qt_base = None, p_bas
 
 # %%
 if __name__ == "__main__":
-    output = spectral_plume_skew(model_type="precip",P=6,z_lcl=700,get_plane = False, 
+    output = spectral_plume_skew(model_type="precip",P=3,z_lcl=700,get_plane = False, 
                                  plotting=True, save_data=False,mprofile="cos",skew_type = "normal")
   
 
