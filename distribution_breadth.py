@@ -603,11 +603,69 @@ def mass_flux_profile(z,z_lcl,z_top,model_type="constant"):
 
 
 # %%
+def distribution_profile(nbins=50, skew="right"):
+    '''
+    Generate a distribution of plumes with different entrainment rates.
+    
+    '''
+    x = np.linspace(0, 1, nbins)
+
+    # Gamma parameters chosen to give a similar low-x peak
+    shape = 4
+    scale = 0.05
+
+    # standard deviation for the central normal case
+    sigma = np.sqrt(shape) * scale
+    mean = np.sqrt(shape)*sigma
+    
+    if skew == "right":
+        pdf = gamma.pdf(x, a=shape, scale=scale)
+        Afac=0.05
+    elif skew == "right_wide":
+        pdf = gamma.pdf(x, a=2, scale=shape*scale/2)
+        Afac=0.05
+    elif skew =="right_narrow":
+
+        pdf = gamma.pdf(x, a=16, scale=shape*scale/16)
+        Afac=0.05
+    elif skew == "normal":
+        mu = 0.5
+        pdf = norm.pdf(x, loc=mu, scale=sigma)
+        Afac=0.05
+    elif skew == "normal_wide":
+        mu = 0.5
+        pdf = norm.pdf(x, loc=mu, scale=sigma*1.3)
+        Afac=0.05
+    elif skew == "normal_narrow":
+        mu = 0.5
+        pdf = norm.pdf(x, loc=mu, scale=sigma/2)
+        Afac=0.05
+    elif skew == "left":
+        # mirror the right-skewed gamma around x = 0.5
+        pdf = gamma.pdf(1 - x, a=shape, scale=scale)
+        Afac=0.05
+    elif skew == "left_wide":
+        pdf = gamma.pdf(1-x, a=2, scale=shape*scale/2)
+        Afac=0.05
+    elif skew == "left_narrow":
+        pdf = gamma.pdf(1 - x, a=16, scale=shape*scale/16)
+        Afac=0.05
+    else:
+        raise ValueError(
+            f"Input: {skew} is not a valid option. "
+            "Choose from 'right', 'normal', 'left', "
+            "'strong-low-entrain', or 'strong-high-entrain'."
+        )
+    
+    return x, pdf, Afac
+
+
 # %%
-def spectral_plume_linear(model_type="precip",T_base = 300., qt_base = None, p_base= 100000., entrain = 0.5, RH = 0.5, 
+# %%
+def spectral_plume_breadth(model_type="precip",T_base = 300., qt_base = None, p_base= 100000., entrain = 0.5, RH = 0.5, 
                         z_base = 50.,z_lcl=1400., z_top = 15000., powerk = 1.0 , deltaz = 50., ent_fac  = 0.18, eta = 0.75, P=3., nbins=200,
                         const=const, get_plane=True, plotting = True,save_data=True,
-                        mprofile="cos",skew_type = "linear-decrease"): # MS add an extra input "mprofile"
+                        mprofile="cos",skew_type = "normal"): # MS add an extra input "mprofile"
     if qt_base is None :
         check_argument(z_lcl     ,'z_lcl'     ,(int,float), z_base, z_top) # m
         qt_base,_,_ = q0_for_target_lcl_height(T_base,p_base,z_base,z_lcl)
@@ -654,25 +712,26 @@ def spectral_plume_linear(model_type="precip",T_base = 300., qt_base = None, p_b
     ent_p[z<=z_lcl] = 0
     
     # DL - estimate entrainment based on mass flux distribution
-    ## get a linear distribution
+    ## get a distribution (normalised so that the area under the curve is 1)
+    ## higher number of bins gives a smoother vertical profile, but takes longer to run
+    x, gamma_pdf, Afac = distribution_profile(nbins=nbins, skew=skew_type)
     
-    b = z_lcl*3
+    ent_max =ent_p[z>z_lcl][0]
+    ent_spec = x * ent_max
+    # scale pdf so that integral mb d epsilon = P/P0
+    mb_spec = gamma_pdf * (
+        (P / const.P0)
+        / np.trapz(gamma_pdf, ent_spec)
+    )
+    
+    weights = mb_spec / np.sum(mb_spec)
 
-    a = 9.5e6
-    ent_b = (-b +np.sqrt(b**2+2*a*(P/const.P0)) )/a
-    ent_spec = np.linspace(0, ent_b, nbins)
+    ent_mean = np.sum(weights * ent_spec)
 
-    ## And we have the distribution of cloud base mass flux
-    if skew_type == "linear-increase":
-        mb_spec = a * ent_spec +b
-    elif skew_type == "linear-decrease":
-        mb_spec = -a*ent_spec+10*b
-    elif skew_type == "uniform":
-        e0 = 0.15 / z_lcl
-        ent_b = e0 * (P/const.P0)
-        ent_spec = np.linspace(0, ent_b, nbins)
-        mb_spec = np.ones_like(ent_spec) / e0
-   
+    ent_std = np.sqrt(
+        np.sum(weights * (ent_spec - ent_mean)**2)
+    )
+
 
     ## in this case np.trapz(mb_spec, ent_spec) should be equal to the total mass flux at cloud base (P)
     ent_p_dist = np.zeros_like(z)
@@ -868,9 +927,9 @@ def spectral_plume_linear(model_type="precip",T_base = 300., qt_base = None, p_b
                         h_ext[i+1] = h_ext[i] - ent_ext*( h_ext[i] - h_env[i] ) *( z[i+1]-z[i] ) 
 
                         # MS - Integrate a spectrum of plumes
-                        ent_spec_u = ent_p[zi_lcl+1]*ent_spec_frac
+                        ent_spec = ent_p[zi_lcl+1]*ent_spec_frac
                         for k in range(10):
-                            h_spec[i+1,k] = h_spec[i,k] - ent_spec_u[k]*(h_spec[i,k]-h_env[i])*( z[i+1]-z[i] )
+                            h_spec[i+1,k] = h_spec[i,k] - ent_spec[k]*(h_spec[i,k]-h_env[i])*( z[i+1]-z[i] )
                         # DL - using the distribution
                         
                         h_dist[i+1] = h_dist[i] - ent_p_dist[i]*( h_dist[i] - h_env[i] ) *( z[i+1]-z[i] ) - (h_dist[0] - h_dist[i])*dent_dist/(1+eta*ent_p_dist[i]*(z[i]-z_lcl))
@@ -992,7 +1051,6 @@ def spectral_plume_linear(model_type="precip",T_base = 300., qt_base = None, p_b
     deficit_hwmean = np.sum(deficit_mid * dz) / dz/ 100 ## pressure units are in Pa
     
     
-    
     if model_type=='precip':
             ent_out = ent_p_dist.copy()
     else:
@@ -1001,7 +1059,7 @@ def spectral_plume_linear(model_type="precip",T_base = 300., qt_base = None, p_b
 
     if get_plane:
         # MS - Return the entrainment rate as well
-        return CAPE_u, CAPE_ext, CAPE_dist, dh, deficit_hwmean, dz, ent_out[z>z_lcl][0],ent_spec, a, b
+        return CAPE_u, CAPE_ext, CAPE_dist, dh, deficit_hwmean, dz, ent_out[z>z_lcl][0], ent_std
     else:
         
             
@@ -1066,8 +1124,8 @@ def spectral_plume_linear(model_type="precip",T_base = 300., qt_base = None, p_b
             
         if plotting:
             import matplotlib.pyplot as plt
-            plt.figure(figsize=(8, 8))
-            plt.subplot(221)
+            plt.figure(figsize=(14, 6))
+            plt.subplot(121)
             plt.plot(h_dist/1000,z/1000, "r", label="distribution")
             plt.plot(h/1000,z/1000, "g", label="plume")
             plt.plot(h_env/1000,z/1000, "b", label="environment")
@@ -1075,25 +1133,19 @@ def spectral_plume_linear(model_type="precip",T_base = 300., qt_base = None, p_b
             plt.ylabel("z (km)")
             plt.title("Spectral plume profiles")
             plt.legend()
-            plt.subplot(222)
-            plt.plot(ent_p_dist*1000,z/1000, "r", label="distribution mass flux")
-            plt.plot(ent_p*1000,z/1000, "g", label="uniform mass flux")
+            plt.subplot(122)
+            plt.plot(ent_p_dist,z/1000, "r", label="distribution mass flux")
+            plt.plot(ent_p,z/1000, "g", label="uniform mass flux")
             plt.xlabel("Entrainment rate (1/km)")
             plt.ylabel("z (km)")
             plt.legend()
-            plt.subplot(223)
-            plt.plot(ent_spec*1000, mb_spec, "r", label="distribution")
-            plt.xlabel("Entrainment rate (1/km)")
-            plt.ylabel("mb")
-            plt.legend()
             plt.tight_layout()
             plt.savefig("Plume_profiles.png", dpi=300)
-        return df,B_u
+        return df,ent_spec
 
 # %%
 if __name__ == "__main__":
-    output = spectral_plume_linear(model_type="precip",P=30,z_lcl=700,get_plane = False, 
-                                 plotting=True, save_data=False,mprofile="cos",skew_type = "uniform")
+    output = spectral_plume_breadth(model_type="precip",P=3,z_lcl=700,get_plane = False, 
+                                 plotting=True, save_data=False,mprofile="cos",skew_type = "normal_narrow")
   
 
-# %%
