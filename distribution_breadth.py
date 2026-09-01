@@ -715,8 +715,10 @@ def spectral_plume_breadth(model_type="precip",T_base = 300., qt_base = None, p_
     ## get a distribution (normalised so that the area under the curve is 1)
     ## higher number of bins gives a smoother vertical profile, but takes longer to run
     x, gamma_pdf, Afac = distribution_profile(nbins=nbins, skew=skew_type)
-    
-    ent_max =ent_p[z>z_lcl][0]
+    e0 = 0.15 / z_lcl
+
+    ent_max = e0 * (P/const.P0)
+    # print(ent_max)
     ent_spec = x * ent_max
     # scale pdf so that integral mb d epsilon = P/P0
     mb_spec = gamma_pdf * (
@@ -732,7 +734,7 @@ def spectral_plume_breadth(model_type="precip",T_base = 300., qt_base = None, p_
         np.sum(weights * (ent_spec - ent_mean)**2)
     )
 
-
+    
     ## in this case np.trapz(mb_spec, ent_spec) should be equal to the total mass flux at cloud base (P)
     ent_p_dist = np.zeros_like(z)
     for i in range(len(z)):
@@ -927,9 +929,9 @@ def spectral_plume_breadth(model_type="precip",T_base = 300., qt_base = None, p_
                         h_ext[i+1] = h_ext[i] - ent_ext*( h_ext[i] - h_env[i] ) *( z[i+1]-z[i] ) 
 
                         # MS - Integrate a spectrum of plumes
-                        ent_spec = ent_p[zi_lcl+1]*ent_spec_frac
+                        ent_spec_p = ent_p[zi_lcl+1]*ent_spec_frac
                         for k in range(10):
-                            h_spec[i+1,k] = h_spec[i,k] - ent_spec[k]*(h_spec[i,k]-h_env[i])*( z[i+1]-z[i] )
+                            h_spec[i+1,k] = h_spec[i,k] - ent_spec_p[k]*(h_spec[i,k]-h_env[i])*( z[i+1]-z[i] )
                         # DL - using the distribution
                         
                         h_dist[i+1] = h_dist[i] - ent_p_dist[i]*( h_dist[i] - h_env[i] ) *( z[i+1]-z[i] ) - (h_dist[0] - h_dist[i])*dent_dist/(1+eta*ent_p_dist[i]*(z[i]-z_lcl))
@@ -1141,11 +1143,14 @@ def spectral_plume_breadth(model_type="precip",T_base = 300., qt_base = None, p_
             plt.legend()
             plt.tight_layout()
             plt.savefig("Plume_profiles.png", dpi=300)
-        return df,ent_spec
+        return df,ent_spec,mb_spec
 
 # %%
-if __name__ == "__main__":
-    output = spectral_plume_breadth(model_type="precip",P=3,z_lcl=700,get_plane = False, 
-                                 plotting=True, save_data=False,mprofile="cos",skew_type = "normal_narrow")
-  
 
+
+
+
+# %
+if __name__ == "__main__":
+    output = spectral_plume_breadth(model_type="precip",P=16,z_lcl=1400,get_plane = False,
+                                 plotting=True, save_data=False,mprofile="cos",skew_type = "normal_narrow")
