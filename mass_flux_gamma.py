@@ -621,35 +621,17 @@ def distribution_profile(nbins=50, skew="right"):
     if skew == "right":
         pdf = gamma.pdf(x, a=shape, scale=scale)
         Afac=0.05
-    elif skew == "right_wide":
-        pdf = gamma.pdf(x, a=2, scale=shape*scale/2)
-        Afac=0.05
-    elif skew =="right_narrow":
 
-        pdf = gamma.pdf(x, a=16, scale=shape*scale/16)
-        Afac=0.05
     elif skew == "normal":
         mu = 0.5
         pdf = norm.pdf(x, loc=mu, scale=sigma)
         Afac=0.05
-    elif skew == "normal_wide":
-        mu = 0.5
-        pdf = norm.pdf(x, loc=mu, scale=sigma*1.3)
-        Afac=0.05
-    elif skew == "normal_narrow":
-        mu = 0.5
-        pdf = norm.pdf(x, loc=mu, scale=sigma/2)
-        Afac=0.05
+
     elif skew == "left":
         # mirror the right-skewed gamma around x = 0.5
         pdf = gamma.pdf(1 - x, a=shape, scale=scale)
         Afac=0.05
-    elif skew == "left_wide":
-        pdf = gamma.pdf(1-x, a=2, scale=shape*scale/2)
-        Afac=0.05
-    elif skew == "left_narrow":
-        pdf = gamma.pdf(1 - x, a=16, scale=shape*scale/16)
-        Afac=0.05
+
     else:
         raise ValueError(
             f"Input: {skew} is not a valid option. "
@@ -715,7 +697,7 @@ def spectral_plume_skew(model_type="precip",T_base = 300., qt_base = None, p_bas
     ## get a distribution (normalised so that the area under the curve is 1)
     ## higher number of bins gives a smoother vertical profile, but takes longer to run
     x, gamma_pdf, Afac = distribution_profile(nbins=nbins, skew=skew_type)
-
+    
     ## This is just an amplitude to control the peak.
     amp = z_lcl/Afac
 
@@ -727,11 +709,14 @@ def spectral_plume_skew(model_type="precip",T_base = 300., qt_base = None, p_bas
 
     ## And we have the distribution of cloud base mass flux
     mb_spec = amp * gamma_pdf / max_pdf_norm
-    ent_std = np.std(ent_spec)
+
+
     ## in this case np.trapz(mb_spec, ent_spec) should be equal to the total mass flux at cloud base (P)
     ent_p_dist = np.zeros_like(z)
+    ent_p10_dist = np.zeros_like(z)
     for i in range(len(z)):
         mass_sum = 0.0
+        contribution = []
         # required mass flux at this height
         M_target = P/const.P0 * M[i]
         ## No entrainment below the cloud base
@@ -740,12 +725,19 @@ def spectral_plume_skew(model_type="precip",T_base = 300., qt_base = None, p_bas
             continue
         for k in range(len(ent_spec)):
 
-            contribution = ( mb_spec[k]  * np.exp(ent_spec[k] * (z[i] - z_lcl))  * np.diff(ent_spec)[0] )
+            d_contribution = ( mb_spec[k]  * np.exp(ent_spec[k] * (z[i] - z_lcl))  * np.diff(ent_spec)[0] )
 
-            mass_sum += contribution
-
+            mass_sum += d_contribution
+            contribution.append(d_contribution)
+            
             if mass_sum >= M_target:
                 ent_p_dist[i] = ent_spec[k]
+                ## take the 10th percentile based on the distribution
+                k_cut = k
+                ent_cut = ent_spec[:k_cut+1]
+                cdf_cut = np.cumsum(np.array(contribution))
+                cdf_cut /= cdf_cut[-1]
+                ent_p10_dist[i] = np.interp( 0.10, cdf_cut, ent_cut )
                 break
        
     ## Initialize arrays to hold plume properties
@@ -918,7 +910,7 @@ def spectral_plume_skew(model_type="precip",T_base = 300., qt_base = None, p_bas
                             dent_dist = 0.
                         h[i+1] = h[i] - ent_p[i]*( h[i] - h_env[i] ) *( z[i+1]-z[i] ) - (h[0] - h[i])*dent/(1+eta*ent_p[i]*(z[i]-z_lcl))
                         ## about extreme?
-                        ent_ext = ent_p_dist[zi_lcl+1]*0.1
+                        ent_ext = ent_p10_dist[zi_lcl+1]#ent_p_dist[zi_lcl+1]*0.1
                         h_ext[i+1] = h_ext[i] - ent_ext*( h_ext[i] - h_env[i] ) *( z[i+1]-z[i] ) 
 
                         # MS - Integrate a spectrum of plumes
@@ -1140,10 +1132,8 @@ def spectral_plume_skew(model_type="precip",T_base = 300., qt_base = None, p_bas
 
 # %%
 if __name__ == "__main__":
-    output = spectral_plume_skew(model_type="precip",P=3,z_lcl=1400,get_plane = False, 
-                                 plotting=True, save_data=False,mprofile="cos",skew_type = "normal_narrow")
+    output = spectral_plume_skew(model_type="precip",P=3,z_lcl=700,get_plane = False, 
+                                 plotting=True, save_data=False,mprofile="cos",skew_type = "normal")
   
-
-# %%
 
 # %%

@@ -737,8 +737,10 @@ def spectral_plume_breadth(model_type="precip",T_base = 300., qt_base = None, p_
     
     ## in this case np.trapz(mb_spec, ent_spec) should be equal to the total mass flux at cloud base (P)
     ent_p_dist = np.zeros_like(z)
+    ent_p10_dist = np.zeros_like(z)
     for i in range(len(z)):
         mass_sum = 0.0
+        contribution = []
         # required mass flux at this height
         M_target = P/const.P0 * M[i]
         ## No entrainment below the cloud base
@@ -747,14 +749,23 @@ def spectral_plume_breadth(model_type="precip",T_base = 300., qt_base = None, p_
             continue
         for k in range(len(ent_spec)):
 
-            contribution = ( mb_spec[k]  * np.exp(ent_spec[k] * (z[i] - z_lcl))  * np.diff(ent_spec)[0] )
+            d_contribution = ( mb_spec[k]  * np.exp(ent_spec[k] * (z[i] - z_lcl))  * np.diff(ent_spec)[0] )
 
-            mass_sum += contribution
-
+            mass_sum += d_contribution
+            contribution.append(d_contribution)
+            
             if mass_sum >= M_target:
                 ent_p_dist[i] = ent_spec[k]
+                ## take the 10th percentile based on the distribution
+                k_cut = k
+                ent_cut = ent_spec[:k_cut+1]
+                cdf_cut = np.cumsum(np.array(contribution))
+                cdf_cut /= cdf_cut[-1]
+                ent_p10_dist[i] = np.interp( 0.10, cdf_cut, ent_cut )
                 break
-       
+    
+    
+    
     ## Initialize arrays to hold plume properties
     p       = np.zeros_like(z)
     logp    = np.zeros_like(z)
@@ -925,7 +936,9 @@ def spectral_plume_breadth(model_type="precip",T_base = 300., qt_base = None, p_
                             dent_dist = 0.
                         h[i+1] = h[i] - ent_p[i]*( h[i] - h_env[i] ) *( z[i+1]-z[i] ) - (h[0] - h[i])*dent/(1+eta*ent_p[i]*(z[i]-z_lcl))
                         ## about extreme?
-                        ent_ext = ent_p_dist[zi_lcl+1]*0.1
+                        # print(ent_p_dist[zi_lcl+1]*0.1)
+                        # print(ent_p10_dist[zi_lcl+1])
+                        ent_ext = ent_p10_dist[zi_lcl+1]#ent_p_dist[zi_lcl+1]*0.1
                         h_ext[i+1] = h_ext[i] - ent_ext*( h_ext[i] - h_env[i] ) *( z[i+1]-z[i] ) 
 
                         # MS - Integrate a spectrum of plumes
@@ -1146,11 +1159,9 @@ def spectral_plume_breadth(model_type="precip",T_base = 300., qt_base = None, p_
         return df,ent_spec,mb_spec
 
 # %%
-
-
-
-
-# %
 if __name__ == "__main__":
-    output = spectral_plume_breadth(model_type="precip",P=16,z_lcl=1400,get_plane = False,
-                                 plotting=True, save_data=False,mprofile="cos",skew_type = "normal_narrow")
+    output = spectral_plume_breadth(model_type="precip",P=16,z_lcl=1400,get_plane = False, 
+                                 plotting=True, save_data=False,mprofile="cos",skew_type = "normal_wide")
+  
+
+# %%
