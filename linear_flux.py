@@ -873,7 +873,7 @@ def spectral_plume_linear(model_type="precip",T_base = 300., qt_base = None, p_b
                             dent_dist = 0.
                         h[i+1] = h[i] - ent_p[i]*( h[i] - h_env[i] ) *( z[i+1]-z[i] ) - (h[0] - h[i])*dent/(1+eta*ent_p[i]*(z[i]-z_lcl))
                         ## about extreme?
-                        ent_ext = ent_p10_dist[zi_lcl+1] #ent_p_dist[zi_lcl+1]*0.1
+                        ent_ext = ent_p10_dist[i] #ent_p_dist[zi_lcl+1]*0.1
                         h_ext[i+1] = h_ext[i] - ent_ext*( h_ext[i] - h_env[i] ) *( z[i+1]-z[i] ) 
 
                         # MS - Integrate a spectrum of plumes

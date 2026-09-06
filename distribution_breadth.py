@@ -938,7 +938,7 @@ def spectral_plume_breadth(model_type="precip",T_base = 300., qt_base = None, p_
                         ## about extreme?
                         # print(ent_p_dist[zi_lcl+1]*0.1)
                         # print(ent_p10_dist[zi_lcl+1])
-                        ent_ext = ent_p10_dist[zi_lcl+1]#ent_p_dist[zi_lcl+1]*0.1
+                        ent_ext = ent_p10_dist[i]#ent_p_dist[zi_lcl+1]*0.1
                         h_ext[i+1] = h_ext[i] - ent_ext*( h_ext[i] - h_env[i] ) *( z[i+1]-z[i] ) 
 
                         # MS - Integrate a spectrum of plumes
