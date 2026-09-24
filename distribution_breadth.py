@@ -634,7 +634,7 @@ def distribution_profile(nbins=50, skew="right"):
         Afac=0.05
     elif skew == "normal_wide":
         mu = 0.5
-        pdf = norm.pdf(x, loc=mu, scale=sigma*1.3)
+        pdf = norm.pdf(x, loc=mu, scale=sigma*np.sqrt(2))
         Afac=0.05
     elif skew == "normal_narrow":
         mu = 0.5
