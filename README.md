@@ -25,3 +25,7 @@ Plotting scripts from Marty Singh are `MSplot_Palmer_plane.ipynb` and `MSplot_pr
 The scipy function for plotting may require `scipy==1.16.2`. A yml file is added if one wants to create the entire environment.
 
 I used the [cmc colormap pacakge](https://github.com/callumrollo/cmcrameri) for some figures.
+
+# For an easy starting point
+
+Please check the `SPM_cookbook.ipynb`.
